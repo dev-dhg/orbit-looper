@@ -1,0 +1,51 @@
+# Build output
+build*/
+build*
+cmake-build-*/
+out/
+
+# IDE
+.vs/
+.vscode/
+*.suo
+*.user
+*.sln.docstates
+.idea/
+*.xcworkspace/
+*.xcuserdata/
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Compiled
+*.o
+*.obj
+*.lib
+*.a
+*.dll
+*.so
+*.dylib
+*.exe
+*.pdb
+*.ilk
+*.exp
+
+# JUCE
+JuceLibraryCode/
+
+# Development memory (local only)
+.claude/
+MEMORY.md
+docs/Handover-Linux-WebView.md
+Source/ui/public/index_old.html
+build_log.txt
+
+# Distribution
+dist/
+*.zip
+*.tar.gz
+*.dmg
+*.pkg
+*.msi

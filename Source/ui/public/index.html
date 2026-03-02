@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Orbit Looper</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="app-wrapper">
+
+        <!-- SIDEBAR -->
+        <div class="sidebar">
+            <!-- Logo -->
+            <div class="sidebar-logo" title="Orbit Looper">
+                <svg viewBox="0 0 32 32" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.5"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="16" cy="16" r="10" opacity="0.4" />
+                    <path d="M16 6 A 10 10 0 0 1 26 16" stroke="var(--color-playing)" />
+                    <circle cx="16" cy="16" r="3" fill="var(--color-playing)" stroke="none" />
+                </svg>
+            </div>
+
+            <!-- Metronome Icon -->
+            <div class="sidebar-icon" id="iconMetro" title="Metronome Settings">
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2L2 22h20L12 2zm0 4v10" stroke-linecap="round" stroke-linejoin="round" />
+                    <circle cx="12" cy="18" r="2" fill="currentColor" stroke="none" />
+                </svg>
+            </div>
+
+            <!-- MIDI Icon -->
+            <div class="sidebar-icon" id="iconMidi" title="MIDI / Key Mapping">
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="2" y="6" width="20" height="12" rx="2" stroke-linecap="round" />
+                    <path d="M6 10v4M10 10v4M14 10v4M18 10v4" stroke-linecap="round" />
+                </svg>
+            </div>
+
+            <div class="sidebar-spacer"></div>
+
+            <!-- Speaker Icon (Audio Options - Standalone Only) -->
+            <div class="sidebar-icon" id="iconAudio" title="Audio Options" style="display: none;">
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M11 5L6 9H2v6h4l5 4V5zM15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14" />
+                </svg>
+            </div>
+
+            <!-- Gear Icon (Orbit Settings) -->
+            <div class="sidebar-icon" id="iconGear" title="Orbit Settings">
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="3" />
+                    <path
+                        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                </svg>
+            </div>
+
+            <!-- Help Icon -->
+            <div class="sidebar-icon" id="iconHelp" title="Help / About">
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01" />
+                </svg>
+            </div>
+
+            <!-- Fullscreen Icon (Hidden per user request for future implementation) -->
+            <div class="sidebar-icon" id="iconFullscreen" title="Toggle Fullscreen" style="display: none;">
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                    d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                </svg>
+            </div>
+        </div>
+
+        <!-- MAIN CONTENT -->
+        <div class="main-content">
+            <!-- Header -->
+            <div class="header">
+                <div class="plugin-name">Orbit Looper</div>
+                <div class="loop-time" id="loopTime">--:--</div>
+            </div>
+
+            <!-- Main Knob Area -->
+            <div class="knob-container">
+                <!-- Playback position ring -->
+                <svg class="playback-ring" viewBox="0 0 310 310">
+                    <!-- Background ring -->
+                    <circle cx="155" cy="155" r="145" fill="none" stroke="#1e1e2e" stroke-width="6" opacity="0.5" />
+                    <!-- Playback arc -->
+                    <circle id="playbackArc" cx="155" cy="155" r="145" fill="none" stroke="#33ff88" stroke-width="6"
+                        stroke-dasharray="0 911" stroke-linecap="round" transform="rotate(-90 155 155)" opacity="0.6" />
+                    <!-- Playhead dot -->
+                    <circle id="playheadDot" cx="155" cy="10" r="5" fill="#33ff88" opacity="0" />
+                </svg>
+
+                <!-- Loop Level Knob (Visual Only) -->
+                <div class="knob" id="knob">
+                    <div class="knob-label">
+                        <div class="knob-value" id="mainDisplay">0:00</div>
+                        <div class="knob-subtext" id="subDisplay">TIME</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- State Display -->
+            <div class="state-display">
+                <div class="state-text empty" id="stateText">READY</div>
+            </div>
+
+            <!-- Transport Controls -->
+            <div class="transport">
+                <!-- Stop/Play Toggle Button -->
+                <button class="transport-btn disabled" id="btnStop" title="Stop">
+                    <svg class="btn-icon" viewBox="0 0 24 24" id="stopIcon">
+                        <rect x="6" y="6" width="12" height="12" rx="1" />
+                    </svg>
+                </button>
+
+                <!-- Record/Overdub Button -->
+                <button class="transport-btn btn-record state-empty" id="btnRecord" title="Record">
+                    <svg class="btn-icon" viewBox="0 0 24 24" id="recordIcon">
+                        <circle cx="12" cy="12" r="8" />
+                    </svg>
+                </button>
+
+                <!-- Clear Button -->
+                <button class="transport-btn disabled" id="btnClear" title="Clear">
+                    <svg class="btn-icon" viewBox="0 0 24 24">
+                        <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2.5"
+                            stroke-linecap="round" />
+                        <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2.5"
+                            stroke-linecap="round" />
+                    </svg>
+                </button>
+
+                <!-- Undo Button -->
+                <button class="transport-btn disabled" id="btnUndo" title="Undo Last Layer">
+                    <svg class="btn-icon" viewBox="0 0 24 24">
+                        <path d="M9 14L4 9l5-5" fill="none" stroke="currentColor" stroke-width="2.5"
+                            stroke-linecap="round" stroke-linejoin="round" />
+                        <path d="M4 9h10a5 5 0 0 1 0 10H12" fill="none" stroke="currentColor" stroke-width="2.5"
+                            stroke-linecap="round" />
+                    </svg>
+                </button>
+
+                <!-- Arm Overdub Button (Task 3) -->
+                <button class="transport-btn active" id="btnArmOverdub" title="Arm Overdub">
+                    <svg class="btn-icon" viewBox="0 0 24 24">
+                        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" fill="none"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                </button>
+
+                <!-- Monitor Button -->
+                <button class="transport-btn btn-monitor" id="btnMonitor" title="Disable Monitoring (Active)">
+                    <svg class="btn-icon" viewBox="0 0 24 24" id="monitorIcon">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor"></polygon>
+                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07" fill="none" stroke="currentColor" stroke-width="2"
+                            stroke-linecap="round" stroke-linejoin="round"></path>
+                        <path d="M19.07 4.93a10 10 0 0 1 0 14.14" fill="none" stroke="currentColor" stroke-width="2"
+                            stroke-linecap="round" stroke-linejoin="round"></path>
+                    </svg>
+                </button>
+
+                <!-- Export Button -->
+                <button class="transport-btn disabled" id="btnExport" title="Export WAV">
+                    <svg class="btn-icon" viewBox="0 0 24 24">
+                        <path d="M12 3v12M12 15l-4-4M12 15l4-4" fill="none" stroke="currentColor" stroke-width="2.5"
+                            stroke-linecap="round" stroke-linejoin="round" />
+                        <path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" />
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Loop Mode 3-Way Toggle -->
+            <div class="mode-3way-container">
+                <div class="mode-3way" id="loopModeToggle">
+                    <div class="mode-segment active" id="segClassic" data-mode="0"
+                        title="Classic: First recording defines the loop length. Overdubs stop at this boundary.">
+                        CLASSIC</div>
+                    <div class="mode-segment" id="segBars" data-mode="1"
+                        title="Bars: Loop length is pre-determined by BPM and Bar settings in the Metronome panel.">BARS
+                    </div>
+                    <div class="mode-segment" id="segDynamic" data-mode="2"
+                        title="Dynamic: Overdubs extend the loop length up to the Global Max Length in Settings.">
+                        DYNAMIC</div>
+                    <div class="mode-selection-pill" id="modePill"></div>
+                </div>
+            </div>
+
+            <!-- UNIFIED GAIN, METERS, AND SETTINGS LAYOUT -->
+            <div class="gain-controls">
+                <!-- Input Gain Slider -->
+                <div class="gain-control">
+                    <div class="gain-label">Input Gain</div>
+                    <div class="gain-slider-track" id="inputGainSlider">
+                        <div class="gain-slider-meter" id="inputMeterFill"></div>
+                        <div class="gain-slider-fill" id="inputGainFill"></div>
+                        <div class="gain-slider-thumb" id="inputGainThumb"></div>
+                    </div>
+                    <div class="pan-knob-container">
+                        <div class="pan-knob" id="inputPanKnob" title="Double-click to reset (Drag up/down to pan)">
+                            <div class="pan-indicator" id="inputPanIndicator"></div>
+                        </div>
+                        <div class="pan-knob-label">PAN</div>
+                    </div>
+                    <div class="gain-value-container">
+                        <div class="gain-value" id="inputGainValue">0.0 dB</div>
+                        <div class="peak-value" id="inputPeakValue">0.0</div>
+                    </div>
+                </div>
+
+                <!-- Output Gain Slider -->
+                <div class="gain-control">
+                    <div class="gain-label">Output Gain</div>
+                    <div class="gain-slider-track" id="outputGainSlider">
+                        <div class="gain-slider-meter" id="outputMeterFill"></div>
+                        <div class="gain-slider-fill" id="outputGainFill"></div>
+                        <div class="gain-slider-thumb" id="outputGainThumb"></div>
+                    </div>
+                    <div class="pan-knob-container">
+                        <div class="pan-knob" id="outputPanKnob" title="Double-click to reset (Drag up/down to pan)">
+                            <div class="pan-indicator" id="outputPanIndicator"></div>
+                        </div>
+                        <div class="pan-knob-label">PAN</div>
+                    </div>
+                    <div class="gain-value-container">
+                        <div class="gain-value" id="outputGainValue">0.0 dB</div>
+                        <div class="peak-value" id="outputPeakValue">0.0</div>
+                    </div>
+                </div>
+
+                <!-- Loop Level -->
+                <div class="gain-control">
+                    <div class="gain-label">Loop Level</div>
+                    <div class="gain-slider-track" id="loopLevelSlider">
+                        <div class="gain-slider-fill" id="loopLevelFill"
+                            style="background: rgba(255, 170, 34, 0.4); width: 95%;"></div>
+                        <div class="gain-slider-thumb" id="loopLevelThumb"
+                            style="border-color: var(--color-overdubbing); left: 95%;"></div>
+                    </div>
+                    <div class="pan-knob-container" style="visibility: hidden;">
+                        <div class="pan-knob"></div>
+                    </div>
+                    <div class="gain-value" id="loopLevelValue">95 %</div>
+                </div>
+            </div>
+
+            <!-- MIDI CC Mapping Panel -->
+
+            <div class="midi-rows" id="midiRows">
+                <!-- Column Headers -->
+                <div class="mapping-header">
+                    <div class="mapping-col-title"></div>
+                    <div class="mapping-col-title">MIDI</div>
+                    <div class="mapping-col-title">Key</div>
+                </div>
+                <div class="midi-row" data-action="11">
+                    <div class="midi-action-name">Play</div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="midiCC11">--</div>
+                        <button class="midi-learn-btn" id="midiLearn11">Learn</button>
+                        <button class="midi-clear-btn hidden" id="midiClear11">&times;</button>
+                    </div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="keyBind11">--</div>
+                        <button class="midi-learn-btn" id="keyLearn11">Learn</button>
+                        <button class="midi-clear-btn hidden" id="keyClear11">&times;</button>
+                    </div>
+                </div>
+                <div class="midi-row" data-action="0">
+                    <div class="midi-action-name">Record</div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="midiCC0">--</div>
+                        <button class="midi-learn-btn" id="midiLearn0">Learn</button>
+                        <button class="midi-clear-btn hidden" id="midiClear0">&times;</button>
+                    </div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="keyBind0">--</div>
+                        <button class="midi-learn-btn" id="keyLearn0">Learn</button>
+                        <button class="midi-clear-btn hidden" id="keyClear0">&times;</button>
+                    </div>
+                </div>
+                <div class="midi-row" data-action="1">
+                    <div class="midi-action-name">Stop</div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="midiCC1">--</div>
+                        <button class="midi-learn-btn" id="midiLearn1">Learn</button>
+                        <button class="midi-clear-btn hidden" id="midiClear1">&times;</button>
+                    </div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="keyBind1">--</div>
+                        <button class="midi-learn-btn" id="keyLearn1">Learn</button>
+                        <button class="midi-clear-btn hidden" id="keyClear1">&times;</button>
+                    </div>
+                </div>
+                <div class="midi-row" data-action="2">
+                    <div class="midi-action-name">Clear</div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="midiCC2">--</div>
+                        <button class="midi-learn-btn" id="midiLearn2">Learn</button>
+                        <button class="midi-clear-btn hidden" id="midiClear2">&times;</button>
+                    </div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="keyBind2">--</div>
+                        <button class="midi-learn-btn" id="keyLearn2">Learn</button>
+                        <button class="midi-clear-btn hidden" id="keyClear2">&times;</button>
+                    </div>
+                </div>
+                <div class="midi-row" data-action="3">
+                    <div class="midi-action-name">Undo</div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="midiCC3">--</div>
+                        <button class="midi-learn-btn" id="midiLearn3">Learn</button>
+                        <button class="midi-clear-btn hidden" id="midiClear3">&times;</button>
+                    </div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="keyBind3">--</div>
+                        <button class="midi-learn-btn" id="keyLearn3">Learn</button>
+                        <button class="midi-clear-btn hidden" id="keyClear3">&times;</button>
+                    </div>
+                </div>
+                <div class="midi-row" data-action="4">
+                    <div class="midi-action-name">Footswitch</div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="midiCC4">--</div>
+                        <button class="midi-learn-btn" id="midiLearn4">Learn</button>
+                        <button class="midi-clear-btn hidden" id="midiClear4">&times;</button>
+                    </div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="keyBind4">--</div>
+                        <button class="midi-learn-btn" id="keyLearn4">Learn</button>
+                        <button class="midi-clear-btn hidden" id="keyClear4">&times;</button>
+                    </div>
+                </div>
+                <div class="midi-row" data-action="5">
+                    <div class="midi-action-name">Overdub</div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="midiCC5">--</div>
+                        <button class="midi-learn-btn" id="midiLearn5">Learn</button>
+                        <button class="midi-clear-btn hidden" id="midiClear5">&times;</button>
+                    </div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="keyBind5">--</div>
+                        <button class="midi-learn-btn" id="keyLearn5">Learn</button>
+                        <button class="midi-clear-btn hidden" id="keyClear5">&times;</button>
+                    </div>
+                </div>
+                <div class="midi-row" data-action="6">
+                    <div class="midi-action-name">Bar Mode</div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="midiCC6">--</div>
+                        <button class="midi-learn-btn" id="midiLearn6">Learn</button>
+                        <button class="midi-clear-btn hidden" id="midiClear6">&times;</button>
+                    </div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="keyBind6">--</div>
+                        <button class="midi-learn-btn" id="keyLearn6">Learn</button>
+                        <button class="midi-clear-btn hidden" id="keyClear6">&times;</button>
+                    </div>
+                </div>
+                <div class="midi-row" data-action="7">
+                    <div class="midi-action-name">Click</div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="midiCC7">--</div>
+                        <button class="midi-learn-btn" id="midiLearn7">Learn</button>
+                        <button class="midi-clear-btn hidden" id="midiClear7">&times;</button>
+                    </div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="keyBind7">--</div>
+                        <button class="midi-learn-btn" id="keyLearn7">Learn</button>
+                        <button class="midi-clear-btn hidden" id="keyClear7">&times;</button>
+                    </div>
+                </div>
+                <div class="midi-row" data-action="8">
+                    <div class="midi-action-name">Pre-count</div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="midiCC8">--</div>
+                        <button class="midi-learn-btn" id="midiLearn8">Learn</button>
+                        <button class="midi-clear-btn hidden" id="midiClear8">&times;</button>
+                    </div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="keyBind8">--</div>
+                        <button class="midi-learn-btn" id="keyLearn8">Learn</button>
+                        <button class="midi-clear-btn hidden" id="keyClear8">&times;</button>
+                    </div>
+                </div>
+                <div class="midi-row" data-action="9">
+                    <div class="midi-action-name">Arm Overdub</div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="midiCC9">--</div>
+                        <button class="midi-learn-btn" id="midiLearn9">Learn</button>
+                        <button class="midi-clear-btn hidden" id="midiClear9">&times;</button>
+                    </div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="keyBind9">--</div>
+                        <button class="midi-learn-btn" id="keyLearn9">Learn</button>
+                        <button class="midi-clear-btn hidden" id="keyClear9">&times;</button>
+                    </div>
+                </div>
+                <div class="midi-row" data-action="10">
+                    <div class="midi-action-name">Play Click</div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="midiCC10">--</div>
+                        <button class="midi-learn-btn" id="midiLearn10">Learn</button>
+                        <button class="midi-clear-btn hidden" id="midiClear10">&times;</button>
+                    </div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="keyBind10">--</div>
+                        <button class="midi-learn-btn" id="keyLearn10">Learn</button>
+                        <button class="midi-clear-btn hidden" id="keyClear10">&times;</button>
+                    </div>
+                </div>
+                <div class="midi-row" data-action="12">
+                    <div class="midi-action-name">Monitor</div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="midiCC12">--</div>
+                        <button class="midi-learn-btn" id="midiLearn12">Learn</button>
+                        <button class="midi-clear-btn hidden" id="midiClear12">&times;</button>
+                    </div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="keyBind12">--</div>
+                        <button class="midi-learn-btn" id="keyLearn12">Learn</button>
+                        <button class="midi-clear-btn hidden" id="keyClear12">&times;</button>
+                    </div>
+                </div>
+                <div class="midi-row" data-action="13">
+                    <div class="midi-action-name">Loop Mode ↻</div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="midiCC13">--</div>
+                        <button class="midi-learn-btn" id="midiLearn13">Learn</button>
+                        <button class="midi-clear-btn hidden" id="midiClear13">&times;</button>
+                    </div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="keyBind13">--</div>
+                        <button class="midi-learn-btn" id="keyLearn13">Learn</button>
+                        <button class="midi-clear-btn hidden" id="keyClear13">&times;</button>
+                    </div>
+                </div>
+                <div class="midi-row" data-action="14">
+                    <div class="midi-action-name">Classic Mode</div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="midiCC14">--</div>
+                        <button class="midi-learn-btn" id="midiLearn14">Learn</button>
+                        <button class="midi-clear-btn hidden" id="midiClear14">&times;</button>
+                    </div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="keyBind14">--</div>
+                        <button class="midi-learn-btn" id="keyLearn14">Learn</button>
+                        <button class="midi-clear-btn hidden" id="keyClear14">&times;</button>
+                    </div>
+                </div>
+                <div class="midi-row" data-action="15">
+                    <div class="midi-action-name">Beats Mode</div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="midiCC15">--</div>
+                        <button class="midi-learn-btn" id="midiLearn15">Learn</button>
+                        <button class="midi-clear-btn hidden" id="midiClear15">&times;</button>
+                    </div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="keyBind15">--</div>
+                        <button class="midi-learn-btn" id="keyLearn15">Learn</button>
+                        <button class="midi-clear-btn hidden" id="keyClear15">&times;</button>
+                    </div>
+                </div>
+                <div class="midi-row" data-action="16">
+                    <div class="midi-action-name">Dynamic Mode</div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="midiCC16">--</div>
+                        <button class="midi-learn-btn" id="midiLearn16">Learn</button>
+                        <button class="midi-clear-btn hidden" id="midiClear16">&times;</button>
+                    </div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="keyBind16">--</div>
+                        <button class="midi-learn-btn" id="keyLearn16">Learn</button>
+                        <button class="midi-clear-btn hidden" id="keyClear16">&times;</button>
+                    </div>
+                </div>
+                <div class="midi-row" data-action="17">
+                    <div class="midi-action-name">Pan In → L</div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="midiCC17">--</div>
+                        <button class="midi-learn-btn" id="midiLearn17">Learn</button>
+                        <button class="midi-clear-btn hidden" id="midiClear17">&times;</button>
+                    </div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="keyBind17">--</div>
+                        <button class="midi-learn-btn" id="keyLearn17">Learn</button>
+                        <button class="midi-clear-btn hidden" id="keyClear17">&times;</button>
+                    </div>
+                </div>
+                <div class="midi-row" data-action="18">
+                    <div class="midi-action-name">Pan In → C</div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="midiCC18">--</div>
+                        <button class="midi-learn-btn" id="midiLearn18">Learn</button>
+                        <button class="midi-clear-btn hidden" id="midiClear18">&times;</button>
+                    </div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="keyBind18">--</div>
+                        <button class="midi-learn-btn" id="keyLearn18">Learn</button>
+                        <button class="midi-clear-btn hidden" id="keyClear18">&times;</button>
+                    </div>
+                </div>
+                <div class="midi-row" data-action="19">
+                    <div class="midi-action-name">Pan In → R</div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="midiCC19">--</div>
+                        <button class="midi-learn-btn" id="midiLearn19">Learn</button>
+                        <button class="midi-clear-btn hidden" id="midiClear19">&times;</button>
+                    </div>
+                    <div class="mapping-cell">
+                        <div class="midi-cc-display" id="keyBind19">--</div>
+                        <button class="midi-learn-btn" id="keyLearn19">Learn</button>
+                        <button class="midi-clear-btn hidden" id="keyClear19">&times;</button>
+                    </div>
+                </div>
+
+            </div>
+
+
+
+            <div class="metro-content" id="metroContent">
+                <!-- ROW 1: Timing & Mode -->
+                <div class="metro-grid-row">
+                    <div class="metro-group">
+                        <div class="metro-input-wrapper">
+                            <span class="metro-label-small">BPM</span>
+                            <input type="number" class="metro-input" id="bpmInput" value="120" min="30" max="300">
+                        </div>
+                    </div>
+
+                    <div class="metro-group">
+                        <div class="metro-input-wrapper">
+                            <span class="metro-label-small">BEATS</span>
+                            <input type="number" class="metro-input" id="beatsInput" value="4" min="1" max="16">
+                        </div>
+                    </div>
+
+                    <!-- Loop Length (Always visible now) -->
+                    <div class="metro-group" id="barsInputContainer">
+                        <div class="metro-input-wrapper">
+                            <span class="metro-label-small">BARS</span>
+                            <input type="number" class="metro-input" id="barsInput" value="4" min="1" max="999">
+                        </div>
+                    </div>
+
+                    <div class="metro-group" style="margin-left: auto;">
+                        <span class="metro-label-small">MODE</span>
+                        <div class="metro-mode-display" id="metroModeDisplay">SEC</div>
+                    </div>
+                </div>
+
+                <div class="metro-duration" id="metroDuration">Duration: 8.0s</div>
+
+                <!-- ROW 2: Playback Features -->
+                <div class="metro-grid-row">
+                    <div class="metro-group">
+                        <span class="metro-label-small">CLICK</span>
+                        <div class="toggle-switch" id="clickToggle">
+                            <div class="toggle-thumb"></div>
+                        </div>
+                        <button class="play-click-btn" id="playClickBtn" title="Audition Click">
+                            <svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor">
+                                <path d="M8 5v14l11-7z" />
+                            </svg>
+                        </button>
+                    </div>
+
+                    <div class="metro-group">
+                        <span class="metro-label-small">PRE-COUNT</span>
+                        <div class="toggle-switch" id="preCountToggle">
+                            <div class="toggle-thumb"></div>
+                        </div>
+                    </div>
+
+                    <div class="metro-group" id="preCountGroup"
+                        style="opacity: 0.4; pointer-events: none; margin-left: 0;">
+                        <div class="metro-input-wrapper">
+                            <span class="metro-label-small">PRE-COUNT BARS</span>
+                            <input type="number" class="metro-input" id="preCountBarsInput" value="2" min="1" max="16"
+                                style="width: 40px;">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ROW 3: Rhythm Matrix -->
+                <div class="metro-matrix">
+                    <div class="rhythm-row-container">
+                        <span class="rhythm-label-large">A</span>
+                        <div class="rhythm-row" id="accentRow"></div>
+                    </div>
+                    <div class="rhythm-row-container">
+                        <span class="rhythm-label-large">B</span>
+                        <div class="rhythm-row" id="regularRow"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Version Footer -->
+        <!-- MODALS -->
+        <style>
+            .modal-overlay {
+                position: fixed;
+                top: 0;
+                left: 60px;
+                /* Offset by sidebar */
+                right: 0;
+                bottom: 0;
+                background: rgba(0, 0, 0, 0.85);
+                z-index: 200;
+                display: none;
+                justify-content: center;
+                align-items: center;
+                backdrop-filter: blur(4px);
+            }
+
+            .modal-overlay.open {
+                display: flex;
+            }
+
+            .modal-content {
+                background: var(--bg-panel);
+                border: 1px solid var(--border);
+                border-radius: 12px;
+                width: 90%;
+                max-width: 400px;
+                max-height: 90vh;
+                overflow-y: auto;
+                padding: 20px;
+                box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+                position: relative;
+            }
+
+            .modal-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 20px;
+                padding-bottom: 10px;
+                border-bottom: 1px solid var(--border);
+            }
+
+            .modal-title {
+                font-size: 14px;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 2px;
+                color: var(--text-primary);
+            }
+
+            .modal-close {
+                background: none;
+                border: none;
+                color: var(--text-dim);
+                font-size: 24px;
+                cursor: pointer;
+                line-height: 1;
+            }
+
+            .modal-close:hover {
+                color: var(--text-primary);
+            }
+        </style>
+
+        <!-- METRONOME MODAL -->
+        <div class="modal-overlay" id="modalMetro">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div class="modal-title">Metronome Settings</div>
+                    <button class="modal-close" onclick="toggleModal('modalMetro')">&times;</button>
+                </div>
+                <!-- Content moved from panel -->
+                <div id="metroModalContent"></div>
+            </div>
+        </div>
+
+        <!-- MIDI MODAL -->
+        <div class="modal-overlay" id="modalMidi">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div class="modal-title">Mapping</div>
+                    <button class="modal-close" onclick="toggleModal('modalMidi')">&times;</button>
+                </div>
+                <div id="midiModalContent"></div>
+            </div>
+        </div>
+
+        <!-- SETTINGS MODAL -->
+        <div class="modal-overlay" id="modalSettings">
+            <div class="modal">
+                <div class="modal-header">
+                    <div class="modal-title">Orbit Settings</div>
+                    <div class="modal-close" onclick="toggleModal('modalSettings')">&times;</div>
+                </div>
+                <div class="modal-content" id="settingsModalContent">
+                    <!-- content moved by JS -->
+                </div>
+            </div>
+        </div>
+
+        <!-- HELP MODAL -->
+        <div class="modal-overlay" id="modalHelp">
+            <div class="modal">
+                <div class="modal-header">
+                    <div class="modal-title">Help / About</div>
+                    <div class="modal-close" onclick="toggleModal('modalHelp')">&times;</div>
+                </div>
+                <div class="modal-content" id="helpModalContent">
+                    <!-- content moved by JS -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Custom JS Resize Handle -->
+        <div class="custom-resizer" id="customResizer" title="Drag to Resize"></div>
+
+    </div> <!-- Close app-wrapper -->
+
+    <!-- OFF-SCREEN CONTENT TO BE MOVED INTO MODALS -->
+    <div style="display:none">
+        <!-- Settings Content -->
+        <div id="settingsContent">
+            <div class="settings-group">
+                <div class="settings-label">GLOBAL MAX LENGTH</div>
+                <div class="settings-desc">Allocates fixed RAM for all loop layers. Higher values use more memory.</div>
+                <div class="settings-options" id="maxLenOptions">
+                    <button class="settings-opt" data-value="60">1m</button>
+                    <button class="settings-opt" data-value="120">2m</button>
+                    <button class="settings-opt active" data-value="300">5m</button>
+                    <button class="settings-opt" data-value="600">10m</button>
+                    <button class="settings-opt" data-value="1200">20m</button>
+                </div>
+            </div>
+            <div class="settings-group">
+                <div class="settings-label">MAX LAYERS</div>
+                <div class="settings-desc">Maximum number of independent overdub layers. More layers use more memory.
+                </div>
+                <div class="settings-options" id="maxLayerOptions">
+                    <button class="settings-opt" data-value="2">2</button>
+                    <button class="settings-opt" data-value="4">4</button>
+                    <button class="settings-opt" data-value="6">6</button>
+                    <button class="settings-opt active" data-value="8">8</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Help Content -->
+        <div id="helpDetailContent">
+            <!-- FOOTSWITCH MODE & GESTURES (MOVED TO TOP) -->
+            <div class="memory-info"
+                style="padding:12px; background:rgba(68,136,255,0.12); border-left:3px solid var(--color-armed); font-size:11px; color:var(--text-secondary); line-height:1.4; margin-bottom: 2px;">
+                <span style="color:var(--text-primary); font-weight:bold; display:block; margin-bottom:0px;">
+                    Footswitch Mode (Ditto Style)
+                </span>
+            </div>
+
+            <div class="footswitch-info"
+                style="margin-bottom: 5px; background: rgba(68, 136, 255, 0.05); padding: 12px; border-radius: 6px; border-left: 3px solid var(--color-armed);">
+                <div class="footswitch-info-title"
+                    style="color:var(--text-primary); font-weight:bold; font-size: 11px; margin-bottom: 8px; text-transform: uppercase;">
+                    Gestures</div>
+                <div class="footswitch-info-row"
+                    style="display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 4px;">
+                    <span class="footswitch-gesture" style="font-weight: bold; color: var(--color-playing);">1×
+                        TAP</span>
+                    <span class="footswitch-desc" style="color: var(--text-secondary);">Rec → Play → Overdub</span>
+                </div>
+                <div class="footswitch-info-row"
+                    style="display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 4px;">
+                    <span class="footswitch-gesture" style="font-weight: bold; color: var(--color-stopped);">2×
+                        TAP</span>
+                    <span class="footswitch-desc" style="color: var(--text-secondary);">Stop Playback</span>
+                </div>
+                <div class="footswitch-info-row"
+                    style="display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 4px;">
+                    <span class="footswitch-gesture" style="font-weight: bold; color: var(--color-empty);">2× TAP +
+                        HOLD</span>
+                    <span class="footswitch-desc" style="color: var(--text-secondary);">Clear All</span>
+                </div>
+                <div class="footswitch-info-row"
+                    style="display: flex; justify-content: space-between; font-size: 10px;">
+                    <span class="footswitch-gesture"
+                        style="font-weight: bold; color: var(--color-overdubbing);">HOLD</span>
+                    <span class="footswitch-desc" style="color: var(--text-secondary);">Undo Last Layer</span>
+                </div>
+            </div>
+
+            <div class="memory-info"
+                style="padding:10px 12px; background:rgba(68,136,255,0.08); border-left:3px solid var(--color-armed); font-size:10px; color:var(--text-secondary); line-height:1.4; margin-bottom: 12px;">
+                <div style="display: flex; align-items: flex-start; gap: 8px;">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"
+                        style="flex-shrink: 0; margin-top: 1px;">
+                        <rect x="2" y="6" width="20" height="12" rx="2" stroke-linecap="round" />
+                        <path d="M6 10v4M10 10v4M14 10v4M18 10v4" stroke-linecap="round" />
+                    </svg>
+                    <div>
+                        To activate this mode, go to the <b>Mapping</b> modal menu and assign a <b>MIDI CC</b> or <b>Key
+                            Mapping</b> to the <b>Footswitch</b> action.
+                    </div>
+                </div>
+            </div>
+
+            <div class="memory-info"
+                style="margin-top:2px; padding:12px; background:rgba(51,255,136,0.1); border-left:3px solid var(--color-playing); font-size:11px; color:var(--text-secondary); line-height:1.4; margin-bottom: 12px;">
+                <span style="color:var(--text-primary); font-weight:bold; display:block; margin-bottom:5px;">🔄
+                    Looping Modes</span>
+                <ul style="margin: 5px 0 0 15px; padding: 0;">
+                    <li style="margin-bottom: 4px;"><b>Classic Mode</b>: The first layer defines the total loop length.
+                    </li>
+                    <li style="margin-bottom: 4px;"><b>Bars Mode</b>: Length is pre-determined by BPM and Bar settings.
+                    </li>
+                    <li style="margin-bottom: 4px;"><b>Dynamic Mode</b>: Overdubs extend the loop length dynamically
+                        until reaching the Global Max Length set in the Settings menu.</li>
+                </ul>
+            </div>
+
+            <div class="memory-info"
+                style="padding:12px; background:rgba(51,255,136,0.08); border-left:3px solid var(--color-playing); font-size:11px; color:var(--text-secondary); line-height:1.4; margin-bottom: 12px;">
+                <span style="color:var(--text-primary); font-weight:bold; display:block; margin-bottom:5px;">🎵
+                    Metronome / Click Track</span>
+                Sample-accurate click track synthesized in the audio thread, routed through your audio interface.
+                <ul style="margin: 5px 0 0 15px; padding: 0;">
+                    <li style="margin-bottom: 4px;"><b>Play ▶ Button</b>: Audition the click at the current BPM without
+                        recording — useful to check speed before committing.</li>
+                    <li style="margin-bottom: 4px;"><b>Click Toggle</b>: Enable or disable the metronome click during
+                        recording and playback, speed is driven by the BPM setting.</li>
+                    <li style="margin-bottom: 4px;"><b>Pre-Count</b>: Count-in bars before recording starts — works with
+                        all trigger methods (button, key, MIDI, footswitch).</li>
+                    <li style="margin-bottom: 4px;"><b>Rhythm Matrix</b>: Step-sequencer-style pattern editor for accent
+                        (A) and regular (B) beats, up to 16 beats per bar.</li>
+                </ul>
+            </div>
+
+            <div class="memory-info"
+                style="padding:12px; background:rgba(68,136,255,0.1); border-left:3px solid var(--color-armed); font-size:11px; color:var(--text-secondary); line-height:1.4; margin-bottom: 12px;">
+                <span style="color:var(--text-primary); font-weight:bold; display:block; margin-bottom:5px;">🎯
+                    Arm Overdub</span>
+                Queues an overdub to start precisely at the next loop boundary instead of immediately. When armed, the
+                status displays <b>ARMED</b> with a blue indicator. The overdub will automatically engage when the loop
+                restarts, ensuring perfectly timed layers. Enabled by default.
+            </div>
+
+            <div class="memory-info"
+                style="padding:12px; background:rgba(68,136,255,0.08); border-left:3px solid var(--color-armed); font-size:11px; color:var(--text-secondary); line-height:1.4; margin-bottom: 12px;">
+                <span style="color:var(--text-primary); font-weight:bold; display:block; margin-bottom:5px;">⌨️
+                    Key Bindings</span>
+                Bind any keyboard key to any of the 20 mappable actions from the MIDI / Key Mapping panel.
+                Each action supports <b>one key</b> — assigning a key that is already bound to another action will
+                automatically reassign it (auto-exclusive). Bindings are saved with the plugin state.
+            </div>
+
+            <div class="memory-info"
+                style="padding:12px; background:rgba(51,255,136,0.06); border-left:3px solid var(--color-playing); font-size:11px; color:var(--text-secondary); line-height:1.4; margin-bottom: 12px;">
+                <span style="color:var(--text-primary); font-weight:bold; display:block; margin-bottom:5px;">💡
+                    Visual Feedback</span>
+                <ul style="margin: 5px 0 0 15px; padding: 0;">
+                    <li style="margin-bottom: 4px;"><b style="color: #ffaa22;">Orange Ring Flash</b>: Undo — the
+                        playback ring briefly flashes orange when a layer is removed.</li>
+                    <li style="margin-bottom: 4px;"><b style="color: #ff4444;">Red Ring Flash</b>: Clear — the ring
+                        flashes red when the entire loop is cleared.</li>
+                    <li style="margin-bottom: 4px;"><b>Pulsing State Text</b>: The status label (RECORDING, OVERDUBBING,
+                        etc.) pulses to indicate active states.</li>
+                    <li style="margin-bottom: 4px;"><b>Beat Highlighting</b>: Rhythm matrix cells highlight in sync with
+                        the metronome beat.</li>
+                    <li style="margin-bottom: 4px;"><b style="color: #4488ff;">Blue Arm Overdub</b>: When overdub is
+                        armed and waiting for the loop boundary, the status shows ARMED with a blue indicator.</li>
+                </ul>
+            </div>
+
+            <div class="memory-info"
+                style="padding:12px; background:rgba(255,170,34,0.08); border-left:3px solid var(--color-overdubbing); font-size:11px; color:var(--text-secondary); line-height:1.4; margin-bottom: 12px;">
+                <span style="color:var(--text-primary); font-weight:bold; display:block; margin-bottom:5px;">🔊
+                    Multi-Layer Architecture</span>
+                Instead of a single buffer with destructive overdub, the looper uses up to <b id="helpMaxLayers">8</b>
+                independent layers. Each layer is a separate audio recording — overdubs never overwrite previous
+                recordings. Use <b>Undo</b> to remove layers one at a time. The maximum number of layers can be
+                configured in the <b>Settings</b> menu (default: 8).
+            </div>
+
+            <div class="memory-info"
+                style="padding:12px; background:rgba(255,170,34,0.1); border-left:3px solid var(--color-overdubbing); font-size:11px; color:var(--text-secondary); line-height:1.4; margin-bottom: 12px;">
+                <span style="color:var(--text-primary); font-weight:bold; display:block; margin-bottom:5px;">⚠️
+                    Memory RAM Usage</span>
+                All loop layers are stored in active RAM for zero-latency overdubbing. Longer Max Length settings
+                combined with more layers use more memory.
+                <ul style="margin: 5px 0 0 15px; padding: 0;">
+                    <li><b>5 Minutes</b> (8 layers): ~0.9 GB RAM</li>
+                    <li><b>10 Minutes</b> (8 layers): ~1.8 GB RAM</li>
+                    <li><b>20 Minutes</b> (8 layers): ~3.7 GB RAM</li>
+                </ul>
+            </div>
+
+            <div
+                style="font-size: 10px; color: var(--text-dim); text-align: center; border-top: 1px solid var(--border); padding-top: 10px;">
+                <div style="margin-bottom: 5px;">Orbit Looper v1.0.0</div>
+                <div style="margin-bottom: 5px;">Debug Console: <span
+                        style="color: var(--text-secondary);">Ctrl+Shift+D</span></div>
+                <a href="https://github.com/dev-dhg/orbit-looper" target="_blank"
+                    style="color: var(--color-playing); text-decoration: none;">github.com/dev-dhg/orbit-looper</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- CUSTOM CONFIRM MODAL (OUTSIDE WRAPPER) -->
+    <div class="modal-overlay" id="modalConfirm" style="z-index: 9999;">
+        <div class="modal" style="max-width: 400px; text-align: center;">
+            <div class="modal-header" style="justify-content: center; border-bottom: none; margin-bottom: -10px;">
+                <div class="modal-title" id="confirmTitle" style="color: #ffaa22; font-size: 14px;">Warning</div>
+            </div>
+            <div id="confirmMessage"
+                style="font-size: 12px; line-height: 1.5; color: var(--text-secondary); margin: 20px 0; text-align: left; background: rgba(255,170,34,0.1); padding: 15px; border-radius: 6px; border-left: 3px solid #ffaa22;">
+                Message goes here
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: center; margin-top: 20px;">
+                <button id="confirmCancelBtn"
+                    style="flex: 1; padding: 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text-primary); cursor: pointer; font-weight: 600;">Cancel</button>
+                <button id="confirmOkBtn"
+                    style="flex: 1; padding: 10px; border-radius: 6px; border: none; background: rgba(255,170,34,0.8); color: #fff; cursor: pointer; font-weight: 600;">Proceed</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="debugLog"
+        style="display:none; position:fixed; top:10px; left:70px; right:10px; bottom:50%; background:rgba(0,0,0,0.8); color:#0f0; font-family:monospace; padding:10px; overflow-y:auto; z-index:10000; pointer-events:none; font-size:10px; border:1px solid #0f0;">
+    </div>
+    <!-- Modular JS: loaded in dependency order (no ES6 modules — JUCE BinaryData limitation) -->
+    <script src="juce-bridge.js"></script>
+    <script src="state.js"></script>
+    <script src="ui-controls.js"></script>
+    <script src="transport.js"></script>
+    <script src="metronome.js"></script>
+    <script src="keymapping.js"></script>
+    <script src="main.js"></script>
+</body>
+
+</html>
