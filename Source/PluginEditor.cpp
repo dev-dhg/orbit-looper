@@ -9,6 +9,10 @@
 #include <cstdlib>
 #endif
 
+#if JUCE_ANDROID
+#include "BluetoothClassicMidi.h"
+#endif
+
 // Temporary debug logging to file (Windows standalone has no console)
 
 //==============================================================================
@@ -72,9 +76,17 @@ OrbitLooperAudioProcessorEditor::OrbitLooperAudioProcessorEditor(
   DBG("OrbitLooper: Loading web content");
   const auto resourceRoot =
       juce::WebBrowserComponent::getResourceProviderRoot();
+
+#if JUCE_ANDROID
+  // Use the mobile-optimised HTML (bottom nav, no scaling, native layout).
+  const auto htmlFile = juce::String("mobile-index.html");
+#else
+  const auto htmlFile = juce::String("index.html");
+#endif
+
   const auto initialUrl = resourceRoot.endsWithChar('/')
-                              ? (resourceRoot + "index.html")
-                              : (resourceRoot + "/index.html");
+                              ? (resourceRoot + htmlFile)
+                              : (resourceRoot + "/" + htmlFile);
   DBG("OrbitLooper: Resource root = " + resourceRoot);
   DBG("OrbitLooper: Initial URL = " + initialUrl);
 
@@ -87,8 +99,73 @@ OrbitLooperAudioProcessorEditor::OrbitLooperAudioProcessorEditor(
   constrainer.setFixedAspectRatio(static_cast<double>(designWidth) /
                                   static_cast<double>(designHeight));
   setConstrainer(&constrainer);
+
+#if JUCE_ANDROID
+  // On Android, fill the full screen. The JS auto-zoom in android-index.html
+  // will scale the 580x720 design to fit whatever area JUCE gives us.
+  {
+    auto& displays = juce::Desktop::getInstance().getDisplays();
+    if (const auto* display = displays.getPrimaryDisplay()) {
+      const auto area = display->userArea;
+      DBG("OrbitLooper: Android display userArea = " +
+          juce::String(area.getWidth()) + "x" + juce::String(area.getHeight()));
+      setSize(area.getWidth(), area.getHeight());
+    } else {
+      setSize(580, 720);
+    }
+  }
+  // No resizing on Android — it's a fixed fullscreen standalone app.
+  setResizable(false, false);
+
+  // Load muteOnStartup from persistent storage (PropertiesFile)
+  {
+    juce::PropertiesFile::Options opts;
+    opts.applicationName = "OrbitLooper";
+    opts.folderName = "OrbitLooper";
+    opts.filenameSuffix = ".settings";
+    juce::PropertiesFile props(opts);
+    bool savedMuteOnStartup = props.getBoolValue("muteOnStartup", true);
+    audioProcessor.muteOnStartup.store(savedMuteOnStartup);
+    DBG("OrbitLooper: muteOnStartup loaded = " + juce::String(savedMuteOnStartup ? "true" : "false"));
+  }
+
+  // Load last connected BT Classic device MAC from persistent storage
+  {
+    juce::PropertiesFile::Options opts;
+    opts.applicationName = "OrbitLooper";
+    opts.folderName = "OrbitLooper";
+    opts.filenameSuffix = ".settings";
+    juce::PropertiesFile props(opts);
+    btClassicLastDeviceMac = props.getValue("btClassicLastDevice", "");
+    DBG("OrbitLooper: btClassicLastDevice loaded = " + btClassicLastDeviceMac);
+  }
+
+  // Initialize the Bluetooth Classic MIDI JNI bridge
+  BluetoothClassicMidi::initialize();
+
+  // NOTE: We do NOT touch JUCE's native standalone mute during construction —
+  // doing so interferes with audio device enumeration on Android.
+  // Instead, we unmute JUCE's native mute after a short delay (once audio
+  // devices are fully initialized), and only if muteOnStartup is OFF.
+  // When muteOnStartup is ON, JUCE stays muted AND our feedbackMuted is true,
+  // so both the device-level mute and our DSP-level mute are active.
+  // The user unmutes both via the red banner or Settings toggle.
+  if (!audioProcessor.muteOnStartup.load()) {
+    juce::Timer::callAfterDelay(1000, []() {
+      if (auto* h = juce::StandalonePluginHolder::getInstance())
+        h->getMuteInputValue().setValue(false);
+    });
+  }
+
+  // Apply our own feedback mute based on the saved preference.
+  // When muteOnStartup is ON (default), mute input pass-through to prevent
+  // feedback from internal speakers. This is separate from the Monitor
+  // (speaker icon) toggle — feedbackMuted is for startup/settings only.
+  audioProcessor.feedbackMuted.store(audioProcessor.muteOnStartup.load());
+#else
   setResizable(true, true);
   setSize(580, 720);
+#endif
 
   // Start timer for state/meter updates (30 Hz)
   startTimerHz(30);
@@ -333,6 +410,142 @@ void OrbitLooperAudioProcessorEditor::timerCallback() {
           juce::String(beatInBar) + ", " + juce::String(totalBeats) + "); }";
       webView->evaluateJavascript(metroJS);
     }
+
+    // Push MIDI activity staleness to JS (BLE connection indicator)
+    {
+        int64_t lastActivity = audioProcessor.lastMidiActivityMs.load();
+        int64_t now = juce::Time::currentTimeMillis();
+        bool midiActive = (lastActivity > 0) && ((now - lastActivity) < 5000);
+        webView->evaluateJavascript(
+            "if(window.updateMidiActivity) window.updateMidiActivity(" +
+            juce::String(midiActive ? "true" : "false") + ");");
+    }
+
+#if JUCE_ANDROID
+    // Push feedback-muted state for the mobile custom mute banner.
+    // This is separate from the Monitor (speaker icon) toggle.
+    {
+      bool fbMuted = audioProcessor.feedbackMuted.load();
+      webView->evaluateJavascript(
+          "if(window.setStandaloneMuteState){window.setStandaloneMuteState(" +
+          juce::String(fbMuted ? "true" : "false") + ");}");
+    }
+    // Hide the native JUCE NotificationArea (yellow mute banner).
+    // We use our own custom red WebView banner instead.
+    if (auto* parent = getParentComponent()) {
+      for (int i = 0; i < parent->getNumChildComponents(); ++i) {
+        auto* child = parent->getChildComponent(i);
+        if (child != this && child != webView.get() && child->isVisible() && child->getHeight() <= 30) {
+          child->setVisible(false);
+          child->setSize(0, 0);
+        }
+      }
+    }
+    // Push muteOnStartup toggle state (once, on first frame after uiReady)
+    {
+      if (!muteOnStartupPushed) {
+        muteOnStartupPushed = true;
+        webView->evaluateJavascript(
+            "if(window.setMuteOnStartupState){window.setMuteOnStartupState(" +
+            juce::String(audioProcessor.muteOnStartup.load() ? "true" : "false") + ");}");
+      }
+    }
+    // Push saved settings state (once, on first frame after uiReady)
+    // Syncs maxLoopSeconds, maxLayerCount, and inputMuted with the UI buttons
+    {
+      if (!settingsSyncPushed) {
+        settingsSyncPushed = true;
+        int maxLen = static_cast<int>(audioProcessor.getMaxLoopLength());
+        int maxLayers = audioProcessor.getMaxLayerCount();
+        bool monitorMuted = audioProcessor.inputMuted.load();
+        webView->evaluateJavascript(
+            "if(window.syncSettings){window.syncSettings(" +
+            juce::String(maxLen) + "," +
+            juce::String(maxLayers) + "," +
+            juce::String(monitorMuted ? "true" : "false") + ");}");
+      }
+    }
+    // Push Bluetooth Classic MIDI connection status to JS
+    {
+      auto btStatus = BluetoothClassicMidi::getLastCallbackStatus();
+      auto btMac = BluetoothClassicMidi::getLastCallbackMac();
+      webView->evaluateJavascript(
+          "if(window.updateBtClassicStatus){window.updateBtClassicStatus('" +
+          btStatus + "','" + btMac + "');}");
+
+      // Persist last connected device MAC to PropertiesFile (Requirement 7.1)
+      if (btStatus == "connected" && btMac.isNotEmpty() && btMac != btClassicLastPersistedMac)
+      {
+        btClassicLastPersistedMac = btMac;
+        btClassicLastDeviceMac = btMac;
+        juce::PropertiesFile::Options opts;
+        opts.applicationName = "OrbitLooper";
+        opts.folderName = "OrbitLooper";
+        opts.filenameSuffix = ".settings";
+        juce::PropertiesFile props(opts);
+        props.setValue("btClassicLastDevice", btMac);
+        props.save();
+        DBG("OrbitLooper: btClassicLastDevice persisted = " + btMac);
+      }
+    }
+    // Push stored BT Classic last device MAC to JS (once, on first frame after uiReady)
+    // This seeds localStorage so updateBtClassicDevices can highlight the device (Requirement 7.2)
+    // Does NOT auto-connect (Requirement 7.3)
+    {
+      if (!btClassicLastDevicePushed) {
+        btClassicLastDevicePushed = true;
+        if (btClassicLastDeviceMac.isNotEmpty()) {
+          webView->evaluateJavascript(
+              "try{localStorage.setItem('btClassicLastDevice','" +
+              btClassicLastDeviceMac + "');}catch(e){}");
+          DBG("OrbitLooper: btClassicLastDevice pushed to JS = " + btClassicLastDeviceMac);
+        }
+      }
+    }
+    // One-shot: on first launch, set audio buffer to lowest available size.
+    // Runs from timer because audio device isn't ready during constructor.
+    {
+      if (!bufferOptimizeDone) {
+        if (auto* holder = juce::StandalonePluginHolder::getInstance()) {
+          auto& dm = holder->deviceManager;
+          if (auto* device = dm.getCurrentAudioDevice()) {
+            bufferOptimizeDone = true;
+            juce::PropertiesFile::Options bOpts;
+            bOpts.applicationName = "OrbitLooper";
+            bOpts.folderName = "OrbitLooper";
+            bOpts.filenameSuffix = ".settings";
+            juce::PropertiesFile bProps(bOpts);
+            if (!bProps.getBoolValue("bufferOptimized", false)) {
+              auto bufferSizes = device->getAvailableBufferSizes();
+              auto currentSetup = dm.getAudioDeviceSetup();
+              if (bufferSizes.size() > 0) {
+                int minBuffer = bufferSizes[0];
+                if (currentSetup.bufferSize > minBuffer) {
+                  currentSetup.bufferSize = minBuffer;
+                  dm.setAudioDeviceSetup(currentSetup, true);
+                  DBG("OrbitLooper: first launch - set buffer to minimum: " + juce::String(minBuffer));
+                }
+              }
+              bProps.setValue("bufferOptimized", true);
+              bProps.save();
+            }
+          }
+        }
+      }
+    }
+    // Periodic state save: Android can kill the app without calling destructors
+    // when swiped away or backgrounded. Save plugin + audio device state every ~5s.
+    {
+      auto now = static_cast<int64_t>(juce::Time::getMillisecondCounter());
+      if (now - lastStateSaveMs >= STATE_SAVE_INTERVAL_MS) {
+        lastStateSaveMs = now;
+        if (auto* holder = juce::StandalonePluginHolder::getInstance()) {
+          holder->savePluginState();
+          holder->saveAudioDeviceState();
+        }
+      }
+    }
+#endif
   } catch (...) {
     // Silently ignore WebView errors during timer callback
   }

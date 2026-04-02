@@ -13,6 +13,8 @@ A guitar looper audio plugin with a modern WebView UI. Record, layer, and loop w
     <td align="center" valign="top"><img src="screenshots/Orbit_Looper_1.png" width="250"/><br/><sub>Default UI</sub></td>
     <td align="center" valign="top"><img src="screenshots/Orbit_Looper_2.png" width="250"/><br/><sub>Metronome</sub></td>
     <td align="center" valign="top"><img src="screenshots/Orbit_Looper_3.png" width="250"/><br/><sub>MIDI / Key Mapping</sub></td>
+    <td align="center" valign="top"><img src="screenshots/Orbit_Looper_4.png" width="150"/><br/><sub>Android (Portrait)</sub></td>
+    <td align="center" valign="top"><img src="screenshots/Orbit_Looper_6_BT_Settings.png" width="150"/><br/><sub>BT Classic MIDI Settings</sub></td>
   </tr>
 </table>
 
@@ -20,6 +22,7 @@ A guitar looper audio plugin with a modern WebView UI. Record, layer, and loop w
 ![AU](https://img.shields.io/badge/format-AU-blue)
 ![LV2](https://img.shields.io/badge/format-LV2-blue)
 ![Standalone](https://img.shields.io/badge/format-Standalone-blue)
+![Android](https://img.shields.io/badge/format-Android_APK-green)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![JUCE 8](https://img.shields.io/badge/JUCE-8.0-orange)
 
@@ -74,6 +77,15 @@ Orbit Looper features three distinct looping modes that change how loop length a
 | **Windows** | VST3, Standalone | WebView2 | x64, ARM64 |
 | **macOS** | VST3, AU, Standalone | WKWebView | Universal (x64 + Apple Silicon) |
 | **Linux** | VST3, LV2, Standalone | WebKitGTK | x64, ARM64 |
+| **Android** | Standalone APK | Android WebView | arm64-v8a |
+
+### Android
+
+- Minimum: Android 11 (API 30)
+- Target: Android 15 (API 35)
+- Portrait-only layout optimized for phone screens
+- BLE MIDI and Bluetooth Classic MIDI (SPP) supported. Includes a patch for BLE MIDI devices that don't appear in standard scans (e.g., Mvave Chocolate Plus).
+- Mute Input on Startup: enabled by default to prevent feedback from internal speakers. Configurable in Settings
 
 ---
 
@@ -148,6 +160,19 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
 ```
 
+#### Android
+Requires Android SDK, NDK 28.1.13356709, and a desktop build directory (for JUCE source via FetchContent).
+
+```bash
+# 1. Run desktop CMake configure first (fetches JUCE)
+cmake -S . -B build
+
+# 2. Build the APK
+cd android
+./gradlew assembleRelease_Release
+# Output: android/app/build/outputs/apk/release_/release/OrbitLooper.apk
+```
+
 ### Build Output
 
 After building, plugin binaries are located in:
@@ -162,6 +187,10 @@ build/OrbitLooper_artefacts/Release/
 │   └── Orbit Looper.lv2/
 └── Standalone/
     └── Orbit Looper[.exe]
+
+# Android
+android/app/build/outputs/apk/release_/release/
+└── OrbitLooper.apk
 ```
 
 ### Installation
@@ -190,6 +219,9 @@ The standalone application saves your audio device settings, MIDI mappings, and 
 ### Quick Start
 
 1. Load the plugin in your DAW or run the standalone version
+
+For a complete walkthrough, see the [User Guide](docs/UserGuide.md).
+
 2. Connect your instrument (guitar, synth, etc.)
 3. Press **Record** — play your loop
 4. Press **Record** again — loop plays back, overdub starts

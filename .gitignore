@@ -1,16 +1,16 @@
-# Build output
-build*/
-build*
-cmake-build-*/
-out/
+# Build output (root-level only)
+/build/
+/build-*/
+/cmake-build-*/
+/out/
 
 # IDE
 .vs/
 .vscode/
+.idea/
 *.suo
 *.user
 *.sln.docstates
-.idea/
 *.xcworkspace/
 *.xcuserdata/
 
@@ -35,12 +35,27 @@ Desktop.ini
 # JUCE
 JuceLibraryCode/
 
-# Development memory (local only)
+# AI / Kiro
+.kiro/
 .claude/
+
+# Development memory (local only)
 MEMORY.md
+HANDOVER.md
 docs/Handover-Linux-WebView.md
 Source/ui/public/index_old.html
 build_log.txt
+
+# Tests (unused)
+Tests/
+
+# Android — local machine config, Gradle cache, CMake build cache
+android/local.properties
+android/.gradle/
+android/.cxx/
+android/app/.cxx/
+android/build/
+android/app/build/
 
 # Distribution
 dist/

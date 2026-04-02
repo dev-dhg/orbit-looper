@@ -264,4 +264,162 @@ if (typeof window.__JUCE__ !== 'undefined' && window.__JUCE__.backend) {
     window.__JUCE__.backend.emitEvent('uiReady', {});
 }
 
+// ========== SETTINGS SYNC (called once from C++ after uiReady) ==========
+// Syncs the Settings modal buttons with the actual processor state on startup.
+// Fixes: default showing "5m" active while processor uses 1m (60s).
+window.syncSettings = function (maxLenSeconds, maxLayers, monitorMuted) {
+    // Sync Global Max Length buttons
+    var maxLenOpts = document.getElementById('maxLenOptions');
+    if (maxLenOpts) {
+        maxLenOpts.querySelectorAll('.settings-opt').forEach(function (btn) {
+            btn.classList.remove('active');
+            if (parseInt(btn.dataset.value) === maxLenSeconds) {
+                btn.classList.add('active');
+            }
+        });
+    }
+
+    // Sync Max Layers buttons
+    var maxLayerOpts = document.getElementById('maxLayerOptions');
+    if (maxLayerOpts) {
+        maxLayerOpts.querySelectorAll('.settings-opt').forEach(function (btn) {
+            btn.classList.remove('active');
+            if (parseInt(btn.dataset.value) === maxLayers) {
+                btn.classList.add('active');
+            }
+        });
+    }
+
+    // Update the help modal layer count display
+    var helpLayers = document.getElementById('helpMaxLayers');
+    if (helpLayers) helpLayers.textContent = maxLayers;
+};
+
+// ========== BLUETOOTH CLASSIC MIDI ==========
+
+// Show BT Classic section on Android (mobile-index.html is only served on Android)
+window.addEventListener('DOMContentLoaded', function () {
+    var btGroup = document.getElementById('btClassicGroup');
+    if (btGroup) btGroup.style.display = '';
+});
+
+/**
+ * Called from C++ to populate the BT Classic device list.
+ * @param {string|Array} devicesJson - JSON string or array of {name, address} objects
+ */
+window.updateBtClassicDevices = function (devicesJson) {
+    var devices;
+    if (typeof devicesJson === 'string') {
+        try { devices = JSON.parse(devicesJson); } catch (e) { devices = []; }
+    } else {
+        devices = devicesJson || [];
+    }
+
+    var list = document.getElementById('btClassicDeviceList');
+    if (!list) return;
+    list.innerHTML = '';
+
+    // Check for permission error marker
+    var permError = document.getElementById('btClassicPermError');
+    if (devices.length === 1 && devices[0].address === 'PERMISSION_ERROR') {
+        if (permError) permError.style.display = '';
+        return;
+    }
+    if (permError) permError.style.display = 'none';
+
+    if (devices.length === 0) {
+        var empty = document.createElement('div');
+        empty.className = 'settings-desc';
+        empty.textContent = 'No compatible Bluetooth Classic devices are paired.';
+        list.appendChild(empty);
+        return;
+    }
+
+    // Retrieve last-connected MAC for highlighting
+    var lastMac = '';
+    try { lastMac = localStorage.getItem('btClassicLastDevice') || ''; } catch (e) {}
+
+    for (var i = 0; i < devices.length; i++) {
+        (function (dev) {
+            var row = document.createElement('div');
+            row.className = 'bt-device-row';
+            row.setAttribute('data-mac', dev.address);
+
+            var indicator = document.createElement('span');
+            indicator.className = 'bt-status-dot';
+
+            var name = document.createElement('span');
+            name.className = 'bt-device-name';
+            name.textContent = dev.name || dev.address;
+
+            var status = document.createElement('span');
+            status.className = 'bt-device-status';
+            status.textContent = 'Disconnected';
+
+            // Highlight last-connected device
+            if (dev.address === lastMac) {
+                row.classList.add('bt-last-connected');
+            }
+
+            row.appendChild(indicator);
+            row.appendChild(name);
+            row.appendChild(status);
+
+            row.addEventListener('click', function () {
+                var st = status.textContent.toLowerCase();
+                if (st === 'connected') {
+                    emitEvent('btClassicDisconnect');
+                } else if (st !== 'connecting...') {
+                    emitEventWithArgs('btClassicConnect', [dev.address]);
+                }
+            });
+
+            list.appendChild(row);
+        })(devices[i]);
+    }
+};
+
+/**
+ * Called from C++ 30Hz timer to update connection status for a device.
+ * @param {string} status - "connected", "connecting", "disconnected"
+ * @param {string} macAddress - MAC address of the device
+ */
+window.updateBtClassicStatus = function (status, macAddress) {
+    var list = document.getElementById('btClassicDeviceList');
+    if (!list) return;
+
+    var rows = list.querySelectorAll('.bt-device-row');
+    for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        var mac = row.getAttribute('data-mac');
+        var statusEl = row.querySelector('.bt-device-status');
+        var dotEl = row.querySelector('.bt-status-dot');
+        if (!statusEl || !dotEl) continue;
+
+        if (mac === macAddress) {
+            if (status === 'connected') {
+                statusEl.textContent = 'Connected';
+                statusEl.className = 'bt-device-status bt-status-connected';
+                dotEl.className = 'bt-status-dot bt-dot-connected';
+                try { localStorage.setItem('btClassicLastDevice', macAddress); } catch (e) {}
+            } else if (status === 'connecting') {
+                statusEl.textContent = 'Connecting...';
+                statusEl.className = 'bt-device-status bt-status-connecting';
+                dotEl.className = 'bt-status-dot bt-dot-connecting';
+            } else {
+                statusEl.textContent = 'Disconnected';
+                statusEl.className = 'bt-device-status';
+                dotEl.className = 'bt-status-dot';
+            }
+        } else {
+            // Other devices reset to disconnected when one connects
+            if (status === 'connected' || status === 'connecting') {
+                statusEl.textContent = 'Disconnected';
+                statusEl.className = 'bt-device-status';
+                dotEl.className = 'bt-status-dot';
+            }
+        }
+    }
+};
+
 console.log('Orbit Looper UI initialized');

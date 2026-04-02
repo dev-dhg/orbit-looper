@@ -67,6 +67,10 @@ body {
     justify-content: center;
     align-items: center;
     overflow: hidden;
+    /* Android WebView: height:100% and 100vh can resolve to 0px.
+       position:fixed + inset:0 reliably fills the viewport. */
+    position: fixed;
+    inset: 0;
 }
 
 /* Create a central wrapper to enforce the 580px x 720px design size */
@@ -555,6 +559,28 @@ body {
 /* ============================================
            MIDI / KEY MAPPING
            ============================================ */
+/* MIDI Activity Indicator Dot */
+.midi-activity-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    margin-left: 6px;
+    vertical-align: middle;
+    transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+
+.midi-activity-dot.midi-active {
+    background: var(--color-playing);
+    box-shadow: 0 0 6px rgba(51, 255, 136, 0.5);
+}
+
+.midi-activity-dot.midi-inactive {
+    background: var(--text-dim);
+    box-shadow: none;
+}
+
 .midi-rows {
     display: none;
     flex-direction: column;
@@ -798,7 +824,8 @@ body {
     height: 8px;
     background: var(--text-primary);
     top: 1px;
-    left: 8px;
+    left: 50%;
+    margin-left: -1px;
     border-radius: 1px;
     transform-origin: 1px 9px;
 }
@@ -1262,4 +1289,73 @@ body {
     min-width: 48px;
     text-align: center;
     letter-spacing: 1px;
+}
+
+/* ============================================
+           BLUETOOTH CLASSIC MIDI
+           ============================================ */
+.bt-device-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    margin-bottom: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.bt-device-row:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: var(--text-secondary);
+}
+
+.bt-device-row.bt-last-connected {
+    border-color: rgba(51, 255, 136, 0.3);
+}
+
+.bt-device-name {
+    flex: 1;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: 0.5px;
+}
+
+.bt-device-status {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+}
+
+.bt-device-status.bt-status-connected {
+    color: var(--color-playing);
+}
+
+.bt-device-status.bt-status-connecting {
+    color: var(--color-overdubbing);
+}
+
+/* Connection status indicator dot */
+.bt-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    flex-shrink: 0;
+    transition: background 0.2s, box-shadow 0.2s;
+}
+
+.bt-status-dot.bt-dot-connected {
+    background: var(--color-playing);
+    box-shadow: 0 0 6px rgba(51, 255, 136, 0.5);
+}
+
+.bt-status-dot.bt-dot-connecting {
+    background: var(--color-overdubbing);
+    box-shadow: 0 0 6px rgba(255, 170, 34, 0.4);
 }

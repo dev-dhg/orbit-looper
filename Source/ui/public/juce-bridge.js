@@ -1,6 +1,21 @@
 // ============================================================================
 // JUCE BRIDGE — SliderState class and parameter binding
 // ============================================================================
+
+// Android WebView bootstrap: JUCE can't auto-inject user scripts on Android
+// (no equivalent of WKUserScript / AddScriptToExecuteOnDocumentCreated).
+// The bridge scripts are stored in Java and retrieved via getAndroidUserScripts().
+// We must eval them before window.__JUCE__.backend becomes available.
+if (typeof window.__JUCE__ !== 'undefined' &&
+    typeof window.__JUCE__.getAndroidUserScripts !== 'undefined' &&
+    typeof window.__JUCE__.backend === 'undefined') {
+    try {
+        eval(window.__JUCE__.getAndroidUserScripts());
+    } catch (e) {
+        console.error("JUCE Android bridge bootstrap failed:", e);
+    }
+}
+
 (function () {
     'use strict';
     try {

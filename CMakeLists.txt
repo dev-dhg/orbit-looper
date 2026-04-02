@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(OrbitLooper VERSION 0.9.0 LANGUAGES C CXX)
+project(OrbitLooper VERSION 1.0.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -57,6 +57,20 @@ if(NOT juce_POPULATED)
         file(READ "${JUCEAIDE_CMAKE}" _juceaide_cmake)
         string(REPLACE "message(FATAL_ERROR \"Testing juceaide failed:\\noutput: \${output}\")" "message(WARNING \"Testing juceaide failed (code: \${result_variable}):\\noutput: \${output}\")" _juceaide_cmake "${_juceaide_cmake}")
         file(WRITE "${JUCEAIDE_CMAKE}" "${_juceaide_cmake}")
+
+        # Patch JUCEUtils.cmake: skip winicon generation if a pre-built icon.ico
+        # exists in assets/. This allows headless Windows CI (Server Core) to work
+        # without running juceaide, which depends on GUI DLLs (dcomp, d2d1, d3d11).
+        if(EXISTS "${CMAKE_SOURCE_DIR}/assets/icon.ico")
+            message(STATUS "Patching JUCE JUCEUtils.cmake to use pre-built icon.ico...")
+            set(JUCE_UTILS_CMAKE "${juce_SOURCE_DIR}/extras/Build/CMake/JUCEUtils.cmake")
+            file(READ "${JUCE_UTILS_CMAKE}" _juce_utils)
+            string(REPLACE
+                "set(generated_icon \"\${juce_library_code}/icon.ico\")\n        _juce_execute_juceaide(winicon \"\${generated_icon}\" \${icon_args})"
+                "set(generated_icon \"\${juce_library_code}/icon.ico\")\n        if(EXISTS \"${CMAKE_SOURCE_DIR}/assets/icon.ico\")\n            file(COPY \"${CMAKE_SOURCE_DIR}/assets/icon.ico\" DESTINATION \"\${juce_library_code}\")\n            message(STATUS \"Using pre-built icon.ico (skipping juceaide winicon)\")\n        else()\n            _juce_execute_juceaide(winicon \"\${generated_icon}\" \${icon_args})\n        endif()"
+                _juce_utils "${_juce_utils}")
+            file(WRITE "${JUCE_UTILS_CMAKE}" "${_juce_utils}")
+        endif()
     endif()
 
     add_subdirectory(${juce_SOURCE_DIR} ${juce_BINARY_DIR})
@@ -170,6 +184,8 @@ target_sources(OrbitLooper
         Source/PluginProcessor.h
         Source/PluginEditor.cpp
         Source/PluginEditor.h
+        Source/BluetoothClassicMidi.cpp
+        Source/BluetoothClassicMidi.h
         Source/ui/OrbitLooperWebBrowser.cpp
         Source/ui/OrbitLooperWebBrowser.h
 )

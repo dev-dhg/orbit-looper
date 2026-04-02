@@ -3,6 +3,10 @@
 #include "BinaryData.h"
 #include <juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h>
 
+#if JUCE_ANDROID
+#include "../BluetoothClassicMidi.h"
+#endif
+
 namespace {
 const char *linuxWebDiagUserScript = R"JS(
         (function () {
@@ -121,10 +125,18 @@ OrbitLooperWebBrowser::getResource(const juce::String &url) {
 
   auto path = resourcePath.substring(1);
 
-  if (path.isEmpty() || path.endsWithIgnoreCase(".html"))
+  if (path.isEmpty())
     path = "index.html";
 
-  if (path == "index.html") {
+#if JUCE_ANDROID
+  if (path == "mobile-index.html") {
+    resourceData = BinaryData::mobileindex_html;
+    resourceSize = BinaryData::mobileindex_htmlSize;
+    mimeType = "text/html";
+  } else
+#endif
+  if (path == "index.html" || path.endsWithIgnoreCase(".html")) {
+    path = "index.html";
     resourceData = BinaryData::index_html;
     resourceSize = BinaryData::index_htmlSize;
     mimeType = "text/html";
@@ -607,7 +619,13 @@ juce::WebBrowserComponent::Options OrbitLooperWebBrowser::createOptions(
                                      juce::Colour::fromString("ff0a0a0f");
                                  options.componentToCentreAround = e;
                                  options.escapeKeyTriggersCloseButton = true;
+                                 // On Android the native title bar has no close
+                                 // button; use JUCE's own chrome instead.
+#if JUCE_ANDROID
+                                 options.useNativeTitleBar = false;
+#else
                                  options.useNativeTitleBar = true;
+#endif
                                  options.resizable = false;
                                  options.launchAsync();
                                }
@@ -647,6 +665,62 @@ juce::WebBrowserComponent::Options OrbitLooperWebBrowser::createOptions(
                                  e->setSize(newWidth, newHeight);
                                }
                              })
+          .withEventListener("standaloneInputUnmute",
+                             [&p](const juce::var &) {
+                               p.feedbackMuted.store(false);
+                               // Also unmute JUCE's device-level mute
+                               if (auto *h = juce::StandalonePluginHolder::getInstance())
+                                 h->getMuteInputValue().setValue(false);
+                             })
+          .withEventListener("standaloneInputMute",
+                             [&p](const juce::var &) {
+                               p.feedbackMuted.store(true);
+                               // Also mute JUCE's device-level mute
+                               if (auto *h = juce::StandalonePluginHolder::getInstance())
+                                 h->getMuteInputValue().setValue(true);
+                             })
+          .withEventListener("setMuteOnStartup",
+                             [&p](const juce::var &args) {
+                               if (args.isArray() && args.size() > 0) {
+                                 bool val = (bool)args[0];
+                                 p.muteOnStartup.store(val);
+                                 DBG("OrbitLooper: setMuteOnStartup = " + juce::String(val ? "true" : "false"));
+                                 // Persist to PropertiesFile
+                                 juce::PropertiesFile::Options opts;
+                                 opts.applicationName = "OrbitLooper";
+                                 opts.folderName = "OrbitLooper";
+                                 opts.filenameSuffix = ".settings";
+                                 juce::PropertiesFile props(opts);
+                                 props.setValue("muteOnStartup", val);
+                                 bool saved = props.save();
+                                 DBG("OrbitLooper: PropertiesFile save() = " + juce::String(saved ? "OK" : "FAILED")
+                                     + " path=" + props.getFile().getFullPathName());
+                               }
+                             })
+#if JUCE_ANDROID
+          .withEventListener("btClassicScan",
+                             [browserInstance](const juce::var &) {
+                               auto json = BluetoothClassicMidi::getPairedDevicesJson();
+                               browserInstance->evaluateJavascript(
+                                   "window.updateBtClassicDevices(" + json + ")");
+                             })
+          .withEventListener("btClassicConnect",
+                             [](const juce::var &args) {
+                               juce::String mac;
+                               if (args.isArray() && args.size() >= 1)
+                                 mac = args[0].toString();
+                               else if (args.hasProperty("mac"))
+                                 mac = args["mac"].toString();
+                               else
+                                 mac = args.toString();
+                               if (mac.isNotEmpty())
+                                 BluetoothClassicMidi::connectDevice(mac);
+                             })
+          .withEventListener("btClassicDisconnect",
+                             [](const juce::var &) {
+                               BluetoothClassicMidi::disconnectDevice();
+                             })
+#endif
           .withEventListener("uiReady", [e](const juce::var &) {
             if (e)
               e->setWebUiReady(true);

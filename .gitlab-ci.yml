@@ -11,63 +11,16 @@ workflow:
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
-# Template for Windows
-.windows_build:
-  stage: build
-  tags:
-    - saas-windows-medium-amd64
-  before_script:
-    - powershell -Command "Install-WindowsFeature Server-Media-Foundation"
-    - choco install -y vcredist140
-    - powershell -Command "Register-PackageSource -ProviderName NuGet -Name nugetRepository -Location https://www.nuget.org/api/v2 -Force"
-    - powershell -Command "Install-Package Microsoft.Web.WebView2 -Scope CurrentUser -RequiredVersion 1.0.3485.44 -Source nugetRepository -Force"
-
-build-windows-x64:
-  extends: .windows_build
-  script:
-    - cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-    - cmake --build build --config $env:BUILD_TYPE --parallel
-  artifacts:
-    name: "OrbitLooper-Windows-x64-$CI_COMMIT_REF_SLUG"
-    paths:
-      - build/OrbitLooper_artefacts/$env:BUILD_TYPE/VST3/
-      - build/OrbitLooper_artefacts/$env:BUILD_TYPE/Standalone/
-
-build-windows-arm64:
-  extends: .windows_build
-  script:
-    - |
-      $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-      $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-      if (!$vsPath) { $vsPath = & $vswhere -latest -property installationPath }
-      $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
-      if (Test-Path $installer) {
-        Write-Host "Installing ARM64 MSVC tools..."
-        Start-Process -FilePath $installer -ArgumentList "modify --installPath `"$vsPath`" --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --quiet --norestart" -Wait -NoNewWindow
-      } else {
-        Write-Warning "Visual Studio Installer not found at $installer"
-      }
-    - cmake -S . -B build -G "Visual Studio 17 2022" -A ARM64 -DCMAKE_SYSTEM_PROCESSOR=arm64
-    - cmake --build build --config $env:BUILD_TYPE --parallel
-  artifacts:
-    name: "OrbitLooper-Windows-ARM64-$CI_COMMIT_REF_SLUG"
-    paths:
-      - build/OrbitLooper_artefacts/$env:BUILD_TYPE/VST3/
-      - build/OrbitLooper_artefacts/$env:BUILD_TYPE/Standalone/
+# ─────────────────────────────────────────────────────────────────────────────
+# Windows builds are disabled on GitLab CI.
+# GitLab SaaS Windows runners use Server Core which lacks GUI DLLs
+# (dcomp.dll, d2d1.dll, d3d11.dll) required by JUCE's juceaide tool.
+# Windows builds run on GitHub Actions instead (full Windows runners).
+# ─────────────────────────────────────────────────────────────────────────────
 
 # build-macos:
-#   stage: build
-#   tags:
-#     - saas-macos-medium-m1
-#   script:
-#     - cmake -S . -B build -G Xcode -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
-#     - cmake --build build --config $BUILD_TYPE -- -quiet
-#   artifacts:
-#     name: "OrbitLooper-macOS-$CI_COMMIT_REF_SLUG"
-#     paths:
-#       - build/OrbitLooper_artefacts/$BUILD_TYPE/VST3/
-#       - build/OrbitLooper_artefacts/$BUILD_TYPE/AU/
-#       - build/OrbitLooper_artefacts/$BUILD_TYPE/Standalone/
+#   Disabled — no macOS runners available on GitLab SaaS free tier.
+#   macOS builds run on GitHub Actions.
 
 build-linux-x64:
   stage: build
@@ -106,3 +59,42 @@ build-linux-arm64:
       - build/OrbitLooper_artefacts/$BUILD_TYPE/VST3/
       - build/OrbitLooper_artefacts/$BUILD_TYPE/LV2/
       - build/OrbitLooper_artefacts/$BUILD_TYPE/Standalone/
+
+build-android:
+  stage: build
+  image: eclipse-temurin:17-jdk
+  tags:
+    - saas-linux-medium-amd64
+  before_script:
+    - apt-get update && apt-get install -y build-essential cmake git unzip wget pkg-config
+      libasound2-dev libfreetype6-dev libx11-dev libxrandr-dev libxinerama-dev
+      libxcursor-dev libxcomposite-dev mesa-common-dev libglu1-mesa-dev
+      libwebkit2gtk-4.1-dev libgtk-3-dev libcurl4-openssl-dev
+    # Install Android SDK
+    - mkdir -p /opt/android-sdk/cmdline-tools
+    - wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O /tmp/cmdline-tools.zip
+    - unzip -q /tmp/cmdline-tools.zip -d /opt/android-sdk/cmdline-tools
+    - mv /opt/android-sdk/cmdline-tools/cmdline-tools /opt/android-sdk/cmdline-tools/latest
+    - export ANDROID_HOME=/opt/android-sdk
+    - export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
+    - yes | sdkmanager --licenses || true
+    - sdkmanager "platforms;android-35" "ndk;28.1.13356709" "build-tools;35.0.0"
+  script:
+    # Desktop configure — fetches JUCE source + builds juceaide for host
+    - cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+    # Build APK — use system Gradle directly instead of the wrapper
+    # (gradle-wrapper.jar in repo may be corrupted by git CRLF conversion)
+    - |
+      GRADLE_VER="8.11.1"
+      GRADLE_DIR="/opt/gradle"
+      mkdir -p "$GRADLE_DIR"
+      wget -q "https://services.gradle.org/distributions/gradle-${GRADLE_VER}-bin.zip" -O /tmp/gradle.zip
+      unzip -qo /tmp/gradle.zip -d "$GRADLE_DIR"
+      export PATH="$GRADLE_DIR/gradle-${GRADLE_VER}/bin:$PATH"
+      export ANDROID_HOME=/opt/android-sdk
+      cd android
+      gradle assembleRelease_Release
+  artifacts:
+    name: "OrbitLooper-Android-arm64-$CI_COMMIT_REF_SLUG"
+    paths:
+      - android/app/build/outputs/apk/release_/release/OrbitLooper.apk

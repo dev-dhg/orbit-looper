@@ -103,7 +103,7 @@ public:
       static_cast<int>(MidiAction::NUM_ACTIONS);
   static constexpr int CC_UNASSIGNED = -1;
   static constexpr int CC_TRIGGER_THRESHOLD =
-      64; // CC >= 64 = triggered (momentary)
+      1; // CC >= 1 = triggered (any non-zero, supports 0/1 style foot controllers)
 
   // Get/set CC assignments
   int getMidiCC(MidiAction action) const;
@@ -119,6 +119,7 @@ public:
   // Thread-safe MIDI state for UI
   std::atomic<int> lastLearnedCC{CC_UNASSIGNED};     // Set when learn completes
   std::atomic<int> lastLearnedAction{CC_UNASSIGNED}; // Which action was learned
+  std::atomic<int64_t> lastMidiActivityMs{0};  // Timestamp of last CC message received (for BLE connection staleness detection)
 
   //==============================================================================
   // Keyboard Mapping (stored as key code strings, e.g. "Space", "KeyR")
@@ -171,6 +172,11 @@ public:
   // Input Monitor State
   std::atomic<bool> inputMuted{false}; // True if input is muted from output
 
+  // Feedback Prevention (Android): separate from Monitor toggle.
+  // When true, input pass-through is silenced to prevent speaker feedback.
+  // Controlled by the red banner + Settings toggle, NOT the transport speaker icon.
+  std::atomic<bool> feedbackMuted{false};
+
   // Overdub Arm ("queue overdub at next loop boundary")
   std::atomic<bool> overdubArmEnabled{true}; // UI toggle state (message thread)
   std::atomic<bool> overdubArmedForUI{
@@ -184,6 +190,9 @@ public:
   std::atomic<int> maxLayerCount{8}; // Runtime cap on overdub layers
   void setMaxLayerCount(int count);
   int getMaxLayerCount() const;
+
+  // Mute on Startup (Android): when true, app starts with input muted
+  std::atomic<bool> muteOnStartup{true};
 
   //==============================================================================
   // Metronome / Click Track (C++ DSP — plays through plugin audio output)
@@ -251,7 +260,7 @@ private:
   //     Layer 0 reads 35 % 30 = 5  (repeats)
   //     Layer 1 reads 35 % 40 = 35 (linear)
   //==============================================================================
-  static constexpr float DEFAULT_MAX_LOOP_SECONDS = 60.0f;
+  static constexpr float DEFAULT_MAX_LOOP_SECONDS = 300.0f;
   static constexpr float SAFETY_LIMIT_SECONDS =
       1800.0f;                         // 30 minutes hard ceiling
   static constexpr int MAX_LAYERS = 8; // Maximum number of loop layers

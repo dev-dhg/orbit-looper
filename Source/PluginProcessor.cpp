@@ -1,6 +1,10 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+#if JUCE_ANDROID
+#include "BluetoothClassicMidi.h"
+#endif
+
 //==============================================================================
 OrbitLooperAudioProcessor::OrbitLooperAudioProcessor()
     : AudioProcessor(
@@ -461,9 +465,13 @@ void OrbitLooperAudioProcessor::startMidiLearn(MidiAction action) {
   midiLearnActive.store(true);
   lastLearnedCC.store(CC_UNASSIGNED);
   lastLearnedAction.store(CC_UNASSIGNED);
+  juce::Logger::writeToLog("OrbitLooper: MIDI learn started for action " +
+      juce::String(static_cast<int>(action)));
 }
 
 void OrbitLooperAudioProcessor::cancelMidiLearn() {
+  juce::Logger::writeToLog("OrbitLooper: MIDI learn cancelled (was active=" +
+      juce::String(midiLearnActive.load() ? "Y" : "N") + ")");
   midiLearnActive.store(false);
   midiLearnTarget.store(CC_UNASSIGNED);
 }
@@ -486,25 +494,42 @@ void OrbitLooperAudioProcessor::processMidiMessages(
   for (const auto metadata : midi) {
     const auto msg = metadata.getMessage();
 
+#if JUCE_ANDROID
+    // Diagnostic: log every message type when MIDI learn is active.
+    if (midiLearnActive.load()) {
+      juce::Logger::writeToLog("OrbitLooper MIDI-LEARN: ch=" + juce::String(msg.getChannel()) +
+          " isCC=" + juce::String(msg.isController() ? "Y" : "N") +
+          " isNote=" + juce::String(msg.isNoteOnOrOff() ? "Y" : "N") +
+          (msg.isController()
+               ? (" cc=" + juce::String(msg.getControllerNumber()) +
+                  " val=" + juce::String(msg.getControllerValue()) +
+                  " threshold=" + juce::String(CC_TRIGGER_THRESHOLD))
+               : juce::String("")));
+    }
+#endif
+
     if (!msg.isController())
       continue;
+
+    // Track last CC activity for BLE connection staleness detection
+    lastMidiActivityMs.store(juce::Time::currentTimeMillis());
 
     const int cc = msg.getControllerNumber();
     const int value = msg.getControllerValue();
 
     // ── MIDI Learn mode ──
     if (midiLearnActive.load()) {
-      // Any CC with value >= threshold completes the learn
-      if (value >= CC_TRIGGER_THRESHOLD) {
-        const int target = midiLearnTarget.load();
-        if (target >= 0 && target < NUM_MIDI_ACTIONS) {
-          setMidiCC(static_cast<MidiAction>(target), cc);
-          lastLearnedCC.store(cc);
-          lastLearnedAction.store(target);
-        }
-        midiLearnActive.store(false);
-        midiLearnTarget.store(CC_UNASSIGNED);
+      // Any CC message completes the learn — value doesn't matter,
+      // we only need the CC number. This fixes BLE MIDI controllers
+      // like AIRSTEP Lite that send val=0 on release.
+      const int target = midiLearnTarget.load();
+      if (target >= 0 && target < NUM_MIDI_ACTIONS) {
+        setMidiCC(static_cast<MidiAction>(target), cc);
+        lastLearnedCC.store(cc);
+        lastLearnedAction.store(target);
       }
+      midiLearnActive.store(false);
+      midiLearnTarget.store(CC_UNASSIGNED);
       continue; // Don't trigger actions while learning
     }
 
@@ -518,6 +543,8 @@ void OrbitLooperAudioProcessor::processMidiMessages(
         if (static_cast<MidiAction>(i) == MidiAction::Footswitch) {
           if (isHigh && !ccWasHigh[static_cast<size_t>(i)]) {
             // Rising edge - CC pressed: act immediately
+            juce::Logger::writeToLog("OrbitLooper TRIGGER: Footswitch cc=" +
+                juce::String(cc) + " val=" + juce::String(value));
             int64_t doublePressWindow = static_cast<int64_t>(
                 (DOUBLE_PRESS_MS / 1000.0) * currentSampleRate);
             if (lastFootswitchPressTime > 0 &&
@@ -543,6 +570,8 @@ void OrbitLooperAudioProcessor::processMidiMessages(
 
         // All other actions: simple rising-edge trigger
         if (isHigh && !ccWasHigh[static_cast<size_t>(i)]) {
+          juce::Logger::writeToLog("OrbitLooper TRIGGER: action=" +
+              juce::String(i) + " cc=" + juce::String(cc) + " val=" + juce::String(value));
           switch (static_cast<MidiAction>(i)) {
           case MidiAction::Record:
             pendingRecord.store(true);
@@ -1216,6 +1245,21 @@ void OrbitLooperAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
                                              juce::MidiBuffer &midiMessages) {
   juce::ScopedNoDenormals noDenormals;
 
+  // Drain Bluetooth Classic MIDI queue into the MidiBuffer (Android only).
+  // No mutex, no heap allocation — lock-free pop from the SPSC ring buffer.
+#if JUCE_ANDROID
+  {
+    MidiMessageSlot slot;
+    while (gBtClassicMidiQueue.pop (slot))
+    {
+      midiMessages.addEvent (slot.data, static_cast<int> (slot.size), 0);
+      lastMidiActivityMs.store (
+          static_cast<int64_t> (juce::Time::getMillisecondCounter()),
+          std::memory_order_relaxed);
+    }
+  }
+#endif
+
   // Process MIDI CC messages (learn + triggers)
   processMidiMessages(midiMessages);
   midiMessages.clear(); // Don't pass MIDI through
@@ -1359,7 +1403,7 @@ void OrbitLooperAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
 
   // Process based on current state
   float peakOut = 0.0f;
-  bool isInputMuted = inputMuted.load();
+  bool isInputMuted = inputMuted.load() || feedbackMuted.load();
 
   switch (currentState) {
   case LooperState::EMPTY:
@@ -1824,6 +1868,8 @@ void OrbitLooperAudioProcessor::getStateInformation(
   state.setProperty("loopMode", loopMode.load(), nullptr);
   state.setProperty("autoLength", isAutoLength.load() ? 1 : 0, nullptr);
   state.setProperty("maxLayerCount", maxLayerCount.load(), nullptr);
+  state.setProperty("muteOnStartup", muteOnStartup.load() ? 1 : 0, nullptr);
+  state.setProperty("inputMuted", inputMuted.load() ? 1 : 0, nullptr);
 
   std::unique_ptr<juce::XmlElement> xml(state.createXml());
   copyXmlToBinary(*xml, destData);
@@ -1929,6 +1975,12 @@ void OrbitLooperAudioProcessor::setStateInformation(const void *data,
         maxLayerCount.store(
             std::clamp(static_cast<int>(tree.getProperty("maxLayerCount")), 1,
                        MAX_LAYERS));
+
+      if (tree.hasProperty("muteOnStartup"))
+        muteOnStartup.store(static_cast<int>(tree.getProperty("muteOnStartup")) != 0);
+
+      if (tree.hasProperty("inputMuted"))
+        inputMuted.store(static_cast<int>(tree.getProperty("inputMuted")) != 0);
 
       apvts.replaceState(tree);
     }

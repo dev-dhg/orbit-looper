@@ -1,0 +1,125 @@
+apply plugin: 'com.android.application'
+
+// NDK version — install via Android Studio:
+//   SDK Manager → SDK Tools → NDK (Side by side) → 28.1.13356709
+def ndkVersionString = "28.1.13356709"
+
+android {
+    compileSdk 35
+    ndkVersion ndkVersionString
+    namespace "com.devdhg.orbitlooper"
+
+    externalNativeBuild {
+        cmake {
+            // Points to android/CMakeLists.txt (one level up from app/)
+            path "../CMakeLists.txt"
+            version "3.22.1"
+        }
+    }
+
+    // Release keystore — CI generates a temporary debug keystore if none exists.
+    // For production, replace with a proper release keystore.
+    signingConfigs {
+        release {
+            def ks = file("${System.properties['user.home']}${File.separator}.android${File.separator}debug.keystore")
+            if (!ks.exists()) {
+                // Generate debug keystore on CI where none exists
+                def cmd = ["keytool", "-genkey", "-v",
+                           "-keystore", ks.absolutePath,
+                           "-storepass", "android",
+                           "-alias", "androiddebugkey",
+                           "-keypass", "android",
+                           "-keyalg", "RSA", "-keysize", "2048", "-validity", "10000",
+                           "-dname", "CN=Android Debug,O=Android,C=US"]
+                cmd.execute().waitFor()
+            }
+            storeFile     ks
+            storePassword "android"
+            keyAlias      "androiddebugkey"
+            keyPassword   "android"
+            storeType     "jks"
+        }
+    }
+
+    defaultConfig {
+        applicationId   "com.devdhg.orbitlooper"
+        // minSdk 30 (Android 11) — ensures AAudio exclusive-mode low-latency is available
+        minSdkVersion    30
+        targetSdkVersion 35
+        versionCode 2
+        versionName "1.0.1"
+
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_TOOLCHAIN=clang",
+                          "-DANDROID_PLATFORM=android-30",
+                          "-DANDROID_STL=c++_static",
+                          "-DANDROID_CPP_FEATURES=exceptions rtti",
+                          "-DANDROID_ARM_MODE=arm",
+                          "-DANDROID_ARM_NEON=TRUE",
+                          "-DANDROID_WEAK_API_DEFS=ON",
+                          "-DCMAKE_CXX_STANDARD=20",
+                          "-DCMAKE_CXX_EXTENSIONS=OFF"
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            debuggable    false
+            jniDebuggable false
+            signingConfig signingConfigs.release
+            minifyEnabled false
+        }
+    }
+
+    // Single release_ flavor — arm64-v8a only for lowest latency on real devices.
+    flavorDimensions "buildVariant"
+    productFlavors {
+        release_ {
+            ndk {
+                abiFilters "arm64-v8a"
+            }
+            externalNativeBuild {
+                cmake {
+                    cFlags   "-O3 -ffast-math"
+                    cppFlags "-O3 -ffast-math"
+                    arguments "-DJUCE_BUILD_CONFIGURATION=RELEASE"
+                }
+            }
+            dimension "buildVariant"
+        }
+    }
+
+    variantFilter { variant ->
+        def names = variant.flavors*.name
+        if (names.contains("release_") && variant.buildType.name != "release") setIgnore(true)
+    }
+
+    // Rename APK output from "app-release_-release.apk" to "OrbitLooper.apk"
+    applicationVariants.all { variant ->
+        variant.outputs.all { output ->
+            outputFileName = "OrbitLooper.apk"
+        }
+    }
+
+    sourceSets {
+        // JUCE Java bootstrap sources — required for the native library to load.
+        // Paths are relative to android/app/.
+        // PREREQUISITE: The desktop CMake configure must have been run first so
+        //               that ../build/_deps/juce-src/ exists.
+        main.java.srcDirs += [
+            "../../build/_deps/juce-src/modules/juce_core/native/javacore/init",
+            "../../build/_deps/juce-src/modules/juce_core/native/javacore/app",
+            "../../build/_deps/juce-src/modules/juce_gui_basics/native/javaopt/app",
+            "../../build/_deps/juce-src/modules/juce_audio_devices/native/javaopt/app",
+            // Include juce_audio_devices java/app so our patched JuceMidiSupport.java
+            // (BLE openBluetoothDevice fix) is compiled into the DEX and overrides
+            // the embedded bytecode in juce_Midi_android.cpp at runtime.
+            "../../build/_deps/juce-src/modules/juce_audio_devices/native/java/app",
+            "../../build/_deps/juce-src/modules/juce_gui_extra/native/java/app",
+            // Bluetooth Classic MIDI bridge service (SPP/RFCOMM)
+            "src/main/java"
+        ]
+    }
+}

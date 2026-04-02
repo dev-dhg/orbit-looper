@@ -41,12 +41,24 @@ window.updateMidiState = function (ccRec, ccStop, ccClr, ccUndo, ccFoot, ccOvr, 
     }
 };
 
-// ========== MIDI LEARN/CLEAR BUTTON LISTENERS ==========
-MIDI_LEARN_EVENTS.forEach(function (eventName, idx) {
-    if (midiLearnBtns[idx]) {
-        midiLearnBtns[idx].addEventListener('click', function () { emitEvent(eventName); });
+// ========== MIDI ACTIVITY INDICATOR (called from C++) ==========
+window.updateMidiActivity = function (active) {
+    var dot = document.getElementById('midiActivityDot');
+    if (!dot) return;
+    if (active) {
+        dot.classList.add('midi-active');
+        dot.classList.remove('midi-inactive');
+    } else {
+        dot.classList.remove('midi-active');
+        dot.classList.add('midi-inactive');
     }
-});
+};
+
+// ========== MIDI LEARN/CLEAR BUTTON LISTENERS ==========
+// NOTE: Learn button onclick is set dynamically by updateMidiState() to either
+// emit the learn event or midiLearnCancel depending on current state.
+// Do NOT add a static addEventListener for learn buttons — it would fire the
+// learn event even when the button shows "Cancel", causing start+cancel races.
 MIDI_CLEAR_EVENTS.forEach(function (eventName, idx) {
     if (midiClearBtns[idx]) {
         midiClearBtns[idx].addEventListener('click', function () { emitEvent(eventName); });
@@ -125,10 +137,29 @@ window.updateKeyBindings = function (k0, k1, k2, k3, k4, k5, k6, k7, k8, k9, k10
 };
 
 // ========== KEYBOARD INPUT DISPATCH ==========
+// Android WebView often returns empty string for e.code on external keyboards.
+// Fall back to e.key and synthesize a code-compatible identifier.
+function getKeyCode(e) {
+    if (e.code && e.code.length > 0) return e.code;
+    var k = e.key || '';
+    if (k.length === 1) {
+        if (k >= 'a' && k <= 'z') return 'Key' + k.toUpperCase();
+        if (k >= 'A' && k <= 'Z') return 'Key' + k;
+        if (k >= '0' && k <= '9') return 'Digit' + k;
+    }
+    var fallbacks = {
+        ' ': 'Space', 'Escape': 'Escape', 'Enter': 'Enter',
+        'Backspace': 'Backspace', 'Delete': 'Delete',
+        'ArrowUp': 'ArrowUp', 'ArrowDown': 'ArrowDown',
+        'ArrowLeft': 'ArrowLeft', 'ArrowRight': 'ArrowRight', 'Tab': 'Tab'
+    };
+    return fallbacks[k] || k;
+}
+
 document.addEventListener('keydown', function (e) {
     if (keyLearning && keyLearnTarget >= 0) {
         e.preventDefault();
-        var keyCode = e.code;
+        var keyCode = getKeyCode(e);
         keyBindingsMap[keyLearnTarget] = keyCode;
         emitEventWithArgs('keyBindSet', [keyLearnTarget, keyCode]);
         keyLearning = false;
@@ -138,7 +169,7 @@ document.addEventListener('keydown', function (e) {
     }
 
     for (var i = 0; i < 20; i++) {
-        if (keyBindingsMap[i] && keyBindingsMap[i] === e.code) {
+        if (keyBindingsMap[i] && keyBindingsMap[i] === getKeyCode(e)) {
             e.preventDefault();
             if (i === 4) {
                 if (!e.repeat && !footswitchKeyHeld) {
@@ -190,7 +221,7 @@ document.addEventListener('keydown', function (e) {
 });
 
 document.addEventListener('keyup', function (e) {
-    if (keyBindingsMap[4] && keyBindingsMap[4] === e.code) {
+    if (keyBindingsMap[4] && keyBindingsMap[4] === getKeyCode(e)) {
         e.preventDefault();
         if (footswitchKeyHeld) {
             footswitchKeyHeld = false;

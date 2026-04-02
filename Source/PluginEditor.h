@@ -71,6 +71,19 @@ private:
   static constexpr int designHeight = 720;
   double currentZoom = 1.0;
   std::atomic<bool> webUiReady{false};
+  bool muteOnStartupPushed = false; // One-shot: push muteOnStartup state to JS
+  bool settingsSyncPushed = false;  // One-shot: push maxLoopSeconds + maxLayerCount to JS
+  bool btClassicLastDevicePushed = false; // One-shot: push stored BT Classic MAC to JS
+  juce::String btClassicLastDeviceMac; // MAC loaded from PropertiesFile at startup
+  juce::String btClassicLastPersistedMac; // Last MAC we wrote to PropertiesFile (avoid repeated writes)
+
+#if JUCE_ANDROID
+  // Android: periodic state save (every ~5s) because the OS can kill the app
+  // without calling destructors when swiped away or backgrounded.
+  int64_t lastStateSaveMs = 0;
+  static constexpr int64_t STATE_SAVE_INTERVAL_MS = 5000;
+  bool bufferOptimizeDone = false; // One-shot: set lowest buffer on first launch
+#endif
 
   //==============================================================================
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(OrbitLooperAudioProcessorEditor)
