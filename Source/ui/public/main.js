@@ -75,16 +75,18 @@ window.setStandaloneMode = function (isStandalone) {
 var currentZoomFactor = 1.0;
 
 window.setZoom = function (factor) {
+    if (document.body.classList.contains('mobile')) return;
     if (Math.abs(currentZoomFactor - factor) < 0.0001) return;
     currentZoomFactor = factor;
     const wrapper = document.querySelector('.app-wrapper');
     if (wrapper) {
-        wrapper.style.transform = `scale(${factor})`;
+        wrapper.style.transform = 'none';
+        wrapper.style.zoom = String(factor);
     }
 };
 
-// contentHeightChanged / ResizeObserver removed — caused resize feedback loop
-// (scrollHeight changes with CSS zoom, feeding back incorrect designHeight to C++)
+// contentHeightChanged / ResizeObserver stays removed: layout zoom changes
+// scrollHeight, so feeding that measurement back to C++ would create a loop.
 
 const resizer = document.getElementById('customResizer');
 let isResizing = false;
@@ -230,7 +232,6 @@ window.addEventListener('DOMContentLoaded', () => {
 // ========== INIT ==========
 buildRhythmMatrix();
 updateBarModeDuration();
-updateMaxLengthDisplay();
 updateGainDisplay('input');
 updateGainDisplay('output');
 setTimeout(initJuceBridge, 50);

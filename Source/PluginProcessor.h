@@ -21,7 +21,10 @@
  * Features multi-layer non-destructive overdub, MIDI/key mapping,
  * metronome with bars mode, overdub arm, and resizable WebView UI.
  */
-class OrbitLooperAudioProcessor : public juce::AudioProcessor {
+class OrbitLooperAudioProcessor
+    : public juce::AudioProcessor,
+      private juce::AsyncUpdater,
+      private juce::AudioProcessorValueTreeState::Listener {
 public:
   //==============================================================================
   // Looper states
@@ -105,6 +108,12 @@ public:
   static constexpr int CC_TRIGGER_THRESHOLD =
       1; // CC >= 1 = triggered (any non-zero, supports 0/1 style foot controllers)
 
+  // Action-name table (PascalCase, enum order). Single source of truth for:
+  //  - WebView event names:   "midiLearn" + name / "midiClear" + name
+  //  - Persistence keys:      "midiCC_" + name.toLowerCase()
+  // MUST stay in sync with the MidiAction enum above.
+  static const std::array<const char *, NUM_MIDI_ACTIONS> &getMidiActionNames();
+
   // Get/set CC assignments
   int getMidiCC(MidiAction action) const;
   void setMidiCC(MidiAction action, int ccNumber); // -1 to unassign
@@ -120,6 +129,8 @@ public:
   std::atomic<int> lastLearnedCC{CC_UNASSIGNED};     // Set when learn completes
   std::atomic<int> lastLearnedAction{CC_UNASSIGNED}; // Which action was learned
   std::atomic<int64_t> lastMidiActivityMs{0};  // Timestamp of last CC message received (for BLE connection staleness detection)
+  std::atomic<bool> midiStateChanged{true}; // Push CC mappings/learn state to
+                                            // UI only when they changed
 
   //==============================================================================
   // Keyboard Mapping (stored as key code strings, e.g. "Space", "KeyR")
@@ -150,9 +161,10 @@ public:
   void triggerOverdub();      // Dedicated overdub (only from PLAYING/STOPPED)
   void triggerPlay();         // Dedicated Play action
   void triggerMonitorToggle();          // Toggle input monitor muting
-  void setMaxLoopLength(float seconds); // Set max loop buffer size
-                                        // (re-allocates on next prepareToPlay)
-  float getMaxLoopLength() const; // Get current max loop length in seconds
+  void setMaxLoopLength(float seconds); // Global Max Length (Settings) — the
+                                        // single loop-length authority;
+                                        // storage resized on message thread
+  float getMaxLoopLength() const; // Get Global Max Length in seconds
   void
   exportLoopToWav(const juce::File &file); // Export loop buffer to WAV file
 
@@ -163,6 +175,9 @@ public:
   std::atomic<float> inputPeakLevel{0.0f};
   std::atomic<float> outputPeakLevel{0.0f};
   std::atomic<float> loopLengthSeconds{0.0f};
+  std::atomic<float> recordBasisSeconds{
+      0.0f}; // While RECORDING: seconds the progress ring/time display is
+             // scaled against (locked length or Global Max)
   std::atomic<bool> hasUndoLayer{false};
 
   // Visual feedback flags (set by audio thread, consumed by UI timer)
@@ -184,7 +199,6 @@ public:
 
   // Loop Mode: Classic, Bars, Dynamic
   std::atomic<int> loopMode{static_cast<int>(LoopMode::Classic)}; // UI state
-  std::atomic<bool> isAutoLength{false}; // UI toggle state (message thread)
 
   // Max Layers: configurable cap on the compile-time MAX_LAYERS array (1–8)
   std::atomic<int> maxLayerCount{8}; // Runtime cap on overdub layers
@@ -237,8 +251,6 @@ public:
   std::atomic<bool> pendingOverdubArmToggle{false};
   std::atomic<bool> pendingPlayClickToggle{false};
   std::atomic<bool> pendingMonitorToggle{false};
-  std::atomic<bool> pendingClassicModeToggle{
-      false}; // Kept for MIDI mapping compatibility, maps to LoopModeCycle
   std::atomic<bool> pendingLoopModeCycle{false};
   std::atomic<bool> pendingSetClassicMode{false};
   std::atomic<bool> pendingSetBeatsMode{false};
@@ -266,13 +278,28 @@ private:
   static constexpr int MAX_LAYERS = 8; // Maximum number of loop layers
   std::atomic<float> maxLoopSeconds{DEFAULT_MAX_LOOP_SECONDS};
 
+  //==============================================================================
+  // Lazy layer storage (decision D1):
+  //  - The Max Length slider / Bars math determines how much a layer really
+  //    needs; the Global Max (maxLoopSeconds) is only a safety ceiling.
+  //  - Only active layers plus one spare have storage. Allocation happens on
+  //    the MESSAGE thread (handleAsyncUpdate); the audio thread only claims
+  //    pre-allocated layers via a capacity gate + publish/re-validate
+  //    handshake (see startOverdubLayer / ensureLayerStorage).
+  //  - `capacity` is the published usable size (0 = not claimable).
+  //    `needsCleanup` marks retired layers whose audio must be zeroed before
+  //    the slot can be reused (set by undo/clear).
+  //==============================================================================
   struct LoopLayer {
     std::vector<float> bufferL;
     std::vector<float> bufferR;
-    int length = 0; // 0 = unused/empty
+    int length = 0; // 0 = unused/empty (audio-thread owned)
+    std::atomic<int> capacity{0};          // published usable samples
+    std::atomic<bool> needsCleanup{false}; // retired, must be zeroed
   };
 
   std::array<LoopLayer, MAX_LAYERS> layers;
+  std::atomic<int> layersInUseAtomic{0}; // Claimed layers (audio → message)
   int numLayers = 0;        // Number of active layers (base + overdubs)
   int masterLoopLength = 0; // Max of all layer lengths (in samples)
   int activeLayerIdx = -1;  // Layer currently being written to (-1 = none)
@@ -286,11 +313,9 @@ private:
       false; // Armed: waiting for loop boundary to start overdub
 
   double currentSampleRate = 44100.0;
-  int maxLoopSamples = 0;
 
   // State machine
   LooperState currentState = LooperState::EMPTY;
-  float currentMaxAllocatedSeconds = 0.0f; // Track actual allocated buffer size
 
   // Pending commands from UI thread
   std::atomic<bool> pendingRecord{false};
@@ -318,9 +343,6 @@ private:
   int64_t totalSamplesProcessed = 0; // Running sample counter
   bool longPressTriggered =
       false; // Prevent re-triggering long press while held
-
-  // Crossfade for smooth transitions
-  static constexpr int CROSSFADE_SAMPLES = 256;
 
   //==============================================================================
   // Metronome DSP internals (audio thread only — NOT atomic)
@@ -353,8 +375,32 @@ private:
 
   //==============================================================================
   void processStateChanges();
+  void resetLooperToEmpty(); // Full wipe → EMPTY (clear + zero-length guards)
+  // State-machine helpers (audio thread only) — single implementations for
+  // logic that used to be duplicated across every trigger path.
+  void finishBaseLayer(int lengthSamples);
+  void finalizeOverdubLayer();
+  bool startOverdubLayer(int fromPosition, bool viaFootswitch = false);
+  void toggleArmOrStartOverdub(bool viaFootswitch);
+  void renderPlaybackTail(const float *inL, const float *inR, float *outL,
+                          float *outR, int fromSample, int numSamples,
+                          bool isInputMuted, float inPanL, float inPanR,
+                          float loopLevel, float &peakOut);
+  void renderOverdubSegment(const float *inL, const float *inR, float *outL,
+                            float *outR, int fromSample, int numSamples,
+                            bool isInputMuted, float inPanL, float inPanR,
+                            float loopLevel, float &peakOut);
   void handleRecordTrigger();
   void handleOverdubTrigger();
+
+  //==============================================================================
+  // Lazy layer storage (message-thread allocator — see LoopLayer above)
+  void handleAsyncUpdate() override; // Allocates/zeroes spare layers
+  void parameterChanged(const juce::String &parameterID,
+                        float newValue) override; // APVTS → re-size storage
+  int requiredLayerCapacitySamples() const; // Mode-dependent target size
+  int globalMaxSamples() const;             // Safety ceiling in samples
+  void ensureLayerStorage(int layerIdx, int targetSamples);
   void handleFootswitchSinglePress();
   void handleFootswitchDoublePress();
   void handleFootswitchLongPress();

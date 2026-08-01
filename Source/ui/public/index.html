@@ -23,47 +23,61 @@
                 </svg>
             </div>
 
-            <!-- Metronome Icon -->
-            <div class="sidebar-icon" id="iconMetro" title="Metronome Settings">
+            <!-- Rhythm & Bars Icon -->
+            <button type="button" class="sidebar-icon" id="iconMetro" title="Rhythm & Bars"
+                aria-label="Open Rhythm & Bars">
                 <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M12 2L2 22h20L12 2zm0 4v10" stroke-linecap="round" stroke-linejoin="round" />
                     <circle cx="12" cy="18" r="2" fill="currentColor" stroke="none" />
                 </svg>
-            </div>
+            </button>
 
             <!-- MIDI Icon -->
-            <div class="sidebar-icon" id="iconMidi" title="MIDI / Key Mapping">
+            <button type="button" class="sidebar-icon" id="iconMidi" title="MIDI / Key Mapping"
+                aria-label="Open MIDI and Key Mapping">
                 <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
                     <rect x="2" y="6" width="20" height="12" rx="2" stroke-linecap="round" />
                     <path d="M6 10v4M10 10v4M14 10v4M18 10v4" stroke-linecap="round" />
                 </svg>
-            </div>
+            </button>
 
             <div class="sidebar-spacer"></div>
 
-            <!-- Speaker Icon (Audio Options - Standalone Only) -->
-            <div class="sidebar-icon" id="iconAudio" title="Audio Options" style="display: none;">
+            <!-- Audio Device Settings (Standalone Only) -->
+            <button type="button" class="sidebar-icon" id="iconAudio" title="Audio Device Settings"
+                aria-label="Open Audio Device Settings" style="display: none;">
                 <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M11 5L6 9H2v6h4l5 4V5zM15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14" />
+                    <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
+                    <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08a1.7 1.7 0 0 0-1.03-1.56 1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.52-1H3v-4h.08A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 8.97 4.6 1.7 1.7 0 0 0 10 3.08V3h4v.08a1.7 1.7 0 0 0 1.03 1.52 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.24.61.83 1 1.52 1H21v4h-.08c-.69 0-1.28.39-1.52 1Z"
+                        stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
-            </div>
+            </button>
 
-            <!-- Gear Icon (Orbit Settings) -->
-            <div class="sidebar-icon" id="iconGear" title="Orbit Settings">
-                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="3" />
-                    <path
-                        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            <!-- Orbit Settings -->
+            <button type="button" class="sidebar-icon" id="iconGear" title="Orbit Settings"
+                aria-label="Open Orbit Settings">
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="21" x2="14" y1="4" y2="4" />
+                    <line x1="10" x2="3" y1="4" y2="4" />
+                    <line x1="21" x2="12" y1="12" y2="12" />
+                    <line x1="8" x2="3" y1="12" y2="12" />
+                    <line x1="21" x2="16" y1="20" y2="20" />
+                    <line x1="12" x2="3" y1="20" y2="20" />
+                    <line x1="14" x2="14" y1="2" y2="6" />
+                    <line x1="8" x2="8" y1="10" y2="14" />
+                    <line x1="16" x2="16" y1="18" y2="22" />
                 </svg>
-            </div>
+            </button>
 
             <!-- Help Icon -->
-            <div class="sidebar-icon" id="iconHelp" title="Help / About">
+            <button type="button" class="sidebar-icon" id="iconHelp" title="Help / About"
+                aria-label="Open Help and About">
                 <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="10" />
                     <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01" />
                 </svg>
-            </div>
+            </button>
 
             <!-- Fullscreen Icon (Hidden per user request for future implementation) -->
             <div class="sidebar-icon" id="iconFullscreen" title="Toggle Fullscreen" style="display: none;">
@@ -108,24 +122,27 @@
                 <div class="state-text empty" id="stateText">READY</div>
             </div>
 
-            <!-- Transport Controls -->
-            <div class="transport">
+            <!-- Primary Transport Controls -->
+            <div class="transport" aria-label="Transport controls">
                 <!-- Stop/Play Toggle Button -->
-                <button class="transport-btn disabled" id="btnStop" title="Stop">
+                <button type="button" class="transport-btn disabled" id="btnStop" title="Stop" aria-label="Stop"
+                    aria-disabled="true" disabled>
                     <svg class="btn-icon" viewBox="0 0 24 24" id="stopIcon">
                         <rect x="6" y="6" width="12" height="12" rx="1" />
                     </svg>
                 </button>
 
                 <!-- Record/Overdub Button -->
-                <button class="transport-btn btn-record state-empty" id="btnRecord" title="Record">
+                <button type="button" class="transport-btn btn-record state-empty" id="btnRecord" title="Record"
+                    aria-label="Record">
                     <svg class="btn-icon" viewBox="0 0 24 24" id="recordIcon">
                         <circle cx="12" cy="12" r="8" />
                     </svg>
                 </button>
 
                 <!-- Clear Button -->
-                <button class="transport-btn disabled" id="btnClear" title="Clear">
+                <button type="button" class="transport-btn disabled" id="btnClear" title="Clear" aria-label="Clear"
+                    aria-disabled="true" disabled>
                     <svg class="btn-icon" viewBox="0 0 24 24">
                         <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2.5"
                             stroke-linecap="round" />
@@ -135,7 +152,8 @@
                 </button>
 
                 <!-- Undo Button -->
-                <button class="transport-btn disabled" id="btnUndo" title="Undo Last Layer">
+                <button type="button" class="transport-btn disabled" id="btnUndo" title="Undo Last Layer"
+                    aria-label="Undo Last Layer" aria-disabled="true" disabled>
                     <svg class="btn-icon" viewBox="0 0 24 24">
                         <path d="M9 14L4 9l5-5" fill="none" stroke="currentColor" stroke-width="2.5"
                             stroke-linecap="round" stroke-linejoin="round" />
@@ -144,16 +162,21 @@
                     </svg>
                 </button>
 
-                <!-- Arm Overdub Button (Task 3) -->
-                <button class="transport-btn active" id="btnArmOverdub" title="Arm Overdub">
+            </div>
+
+            <!-- Secondary Performance Actions -->
+            <div class="utility-actions" aria-label="Loop utilities">
+                <button type="button" class="utility-btn active" id="btnArmOverdub" title="Arm Overdub"
+                    aria-pressed="true">
                     <svg class="btn-icon" viewBox="0 0 24 24">
                         <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" fill="none"
                             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
                     </svg>
+                    <span class="utility-label">Arm</span>
                 </button>
 
-                <!-- Monitor Button -->
-                <button class="transport-btn btn-monitor" id="btnMonitor" title="Disable Monitoring (Active)">
+                <button type="button" class="utility-btn btn-monitor" id="btnMonitor" title="Disable Monitoring (Active)"
+                    aria-pressed="true">
                     <svg class="btn-icon" viewBox="0 0 24 24" id="monitorIcon">
                         <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor"></polygon>
                         <path d="M15.54 8.46a5 5 0 0 1 0 7.07" fill="none" stroke="currentColor" stroke-width="2"
@@ -161,32 +184,34 @@
                         <path d="M19.07 4.93a10 10 0 0 1 0 14.14" fill="none" stroke="currentColor" stroke-width="2"
                             stroke-linecap="round" stroke-linejoin="round"></path>
                     </svg>
+                    <span class="utility-label">Monitor</span>
                 </button>
 
-                <!-- Export Button -->
-                <button class="transport-btn disabled" id="btnExport" title="Export WAV">
+                <button type="button" class="utility-btn disabled" id="btnExport" title="Export WAV"
+                    aria-disabled="true" disabled>
                     <svg class="btn-icon" viewBox="0 0 24 24">
                         <path d="M12 3v12M12 15l-4-4M12 15l4-4" fill="none" stroke="currentColor" stroke-width="2.5"
                             stroke-linecap="round" stroke-linejoin="round" />
                         <path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" fill="none" stroke="currentColor"
                             stroke-width="2" stroke-linecap="round" />
                     </svg>
+                    <span class="utility-label">Export</span>
                 </button>
             </div>
 
             <!-- Loop Mode 3-Way Toggle -->
             <div class="mode-3way-container">
-                <div class="mode-3way" id="loopModeToggle">
-                    <div class="mode-segment active" id="segClassic" data-mode="0"
-                        title="Classic: First recording defines the loop length. Overdubs stop at this boundary.">
-                        CLASSIC</div>
-                    <div class="mode-segment" id="segBars" data-mode="1"
-                        title="Bars: Loop length is pre-determined by BPM and Bar settings in the Metronome panel.">BARS
-                    </div>
-                    <div class="mode-segment" id="segDynamic" data-mode="2"
+                <div class="mode-3way" id="loopModeToggle" role="group" aria-label="Loop mode">
+                    <button type="button" class="mode-segment active" id="segClassic" data-mode="0"
+                        title="Classic: First recording defines the loop length. Overdubs stop at this boundary."
+                        aria-pressed="true">CLASSIC</button>
+                    <button type="button" class="mode-segment" id="segBars" data-mode="1"
+                        title="Bars: Loop length is determined by BPM on the main screen and Bars and Beats in Rhythm &amp; Bars."
+                        aria-pressed="false">BARS</button>
+                    <button type="button" class="mode-segment" id="segDynamic" data-mode="2"
                         title="Dynamic: Overdubs extend the loop length up to the Global Max Length in Settings.">
-                        DYNAMIC</div>
-                    <div class="mode-selection-pill" id="modePill"></div>
+                        DYNAMIC</button>
+                    <div class="mode-selection-pill" id="modePill" aria-hidden="true"></div>
                 </div>
             </div>
 
@@ -245,6 +270,33 @@
                         <div class="pan-knob"></div>
                     </div>
                     <div class="gain-value" id="loopLevelValue">95 %</div>
+                </div>
+            </div>
+
+            <!-- Performance Tempo Controls -->
+            <div class="tempo-strip" aria-label="Tempo controls">
+                <label class="tempo-control tempo-bpm" for="bpmInput">
+                    <span class="tempo-label">BPM</span>
+                    <input type="number" class="tempo-input" id="bpmInput" value="120" min="30" max="300"
+                        inputmode="numeric" aria-label="Tempo in beats per minute">
+                </label>
+
+                <button type="button" class="tap-tempo-btn" id="tapTempoButton" title="Tap Tempo">TAP</button>
+
+                <div class="tempo-control">
+                    <span class="tempo-label" id="clickToggleLabel">Click</span>
+                    <button type="button" class="toggle-switch" id="clickToggle" aria-labelledby="clickToggleLabel"
+                        aria-pressed="false">
+                        <span class="toggle-thumb"></span>
+                    </button>
+                </div>
+
+                <div class="tempo-control">
+                    <span class="tempo-label" id="preCountToggleLabel">Pre-count</span>
+                    <button type="button" class="toggle-switch" id="preCountToggle"
+                        aria-labelledby="preCountToggleLabel" aria-pressed="false">
+                        <span class="toggle-thumb"></span>
+                    </button>
                 </div>
             </div>
 
@@ -527,13 +579,6 @@
                 <div class="metro-grid-row">
                     <div class="metro-group">
                         <div class="metro-input-wrapper">
-                            <span class="metro-label-small">BPM</span>
-                            <input type="number" class="metro-input" id="bpmInput" value="120" min="30" max="300">
-                        </div>
-                    </div>
-
-                    <div class="metro-group">
-                        <div class="metro-input-wrapper">
                             <span class="metro-label-small">BEATS</span>
                             <input type="number" class="metro-input" id="beatsInput" value="4" min="1" max="16">
                         </div>
@@ -555,25 +600,16 @@
 
                 <div class="metro-duration" id="metroDuration">Duration: 8.0s</div>
 
-                <!-- ROW 2: Playback Features -->
+                <!-- ROW 2: Advanced Playback Features -->
                 <div class="metro-grid-row">
                     <div class="metro-group">
-                        <span class="metro-label-small">CLICK</span>
-                        <div class="toggle-switch" id="clickToggle">
-                            <div class="toggle-thumb"></div>
-                        </div>
-                        <button class="play-click-btn" id="playClickBtn" title="Audition Click">
+                        <span class="metro-label-small">AUDITION CLICK</span>
+                        <button type="button" class="play-click-btn" id="playClickBtn" title="Audition Click"
+                            aria-pressed="false">
                             <svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor">
                                 <path d="M8 5v14l11-7z" />
                             </svg>
                         </button>
-                    </div>
-
-                    <div class="metro-group">
-                        <span class="metro-label-small">PRE-COUNT</span>
-                        <div class="toggle-switch" id="preCountToggle">
-                            <div class="toggle-thumb"></div>
-                        </div>
                     </div>
 
                     <div class="metro-group" id="preCountGroup"
@@ -602,75 +638,13 @@
 
         <!-- Version Footer -->
         <!-- MODALS -->
-        <style>
-            .modal-overlay {
-                position: fixed;
-                top: 0;
-                left: 60px;
-                /* Offset by sidebar */
-                right: 0;
-                bottom: 0;
-                background: rgba(0, 0, 0, 0.85);
-                z-index: 200;
-                display: none;
-                justify-content: center;
-                align-items: center;
-                backdrop-filter: blur(4px);
-            }
-
-            .modal-overlay.open {
-                display: flex;
-            }
-
-            .modal-content {
-                background: var(--bg-panel);
-                border: 1px solid var(--border);
-                border-radius: 12px;
-                width: 90%;
-                max-width: 400px;
-                max-height: 90vh;
-                overflow-y: auto;
-                padding: 20px;
-                box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-                position: relative;
-            }
-
-            .modal-header {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin-bottom: 20px;
-                padding-bottom: 10px;
-                border-bottom: 1px solid var(--border);
-            }
-
-            .modal-title {
-                font-size: 14px;
-                font-weight: 700;
-                text-transform: uppercase;
-                letter-spacing: 2px;
-                color: var(--text-primary);
-            }
-
-            .modal-close {
-                background: none;
-                border: none;
-                color: var(--text-dim);
-                font-size: 24px;
-                cursor: pointer;
-                line-height: 1;
-            }
-
-            .modal-close:hover {
-                color: var(--text-primary);
-            }
-        </style>
+        <!-- MODALS (shared styles live in style.css) -->
 
         <!-- METRONOME MODAL -->
         <div class="modal-overlay" id="modalMetro">
             <div class="modal-content">
                 <div class="modal-header">
-                    <div class="modal-title">Metronome Settings</div>
+                    <div class="modal-title">Rhythm &amp; Bars</div>
                     <button class="modal-close" onclick="toggleModal('modalMetro')">&times;</button>
                 </div>
                 <!-- Content moved from panel -->
@@ -726,7 +700,7 @@
         <div id="settingsContent">
             <div class="settings-group">
                 <div class="settings-label">GLOBAL MAX LENGTH</div>
-                <div class="settings-desc">Allocates fixed RAM for all loop layers. Higher values use more memory.</div>
+                <div class="settings-desc">Maximum loop length (tape length). Memory is allocated per layer as you record — longer loops and Dynamic mode use more RAM.</div>
                 <div class="settings-options" id="maxLenOptions">
                     <button class="settings-opt" data-value="60">1m</button>
                     <button class="settings-opt" data-value="120">2m</button>
@@ -821,17 +795,17 @@
             <div class="memory-info"
                 style="padding:12px; background:rgba(51,255,136,0.08); border-left:3px solid var(--color-playing); font-size:11px; color:var(--text-secondary); line-height:1.4; margin-bottom: 12px;">
                 <span style="color:var(--text-primary); font-weight:bold; display:block; margin-bottom:5px;">🎵
-                    Metronome / Click Track</span>
+                    Tempo / Click Track</span>
                 Sample-accurate click track synthesized in the audio thread, routed through your audio interface.
                 <ul style="margin: 5px 0 0 15px; padding: 0;">
-                    <li style="margin-bottom: 4px;"><b>Play ▶ Button</b>: Audition the click at the current BPM without
-                        recording — useful to check speed before committing.</li>
-                    <li style="margin-bottom: 4px;"><b>Click Toggle</b>: Enable or disable the metronome click during
-                        recording and playback, speed is driven by the BPM setting.</li>
-                    <li style="margin-bottom: 4px;"><b>Pre-Count</b>: Count-in bars before recording starts — works with
-                        all trigger methods (button, key, MIDI, footswitch).</li>
-                    <li style="margin-bottom: 4px;"><b>Rhythm Matrix</b>: Step-sequencer-style pattern editor for accent
-                        (A) and regular (B) beats, up to 16 beats per bar.</li>
+                    <li style="margin-bottom: 4px;"><b>BPM / TAP</b>: Enter an exact tempo or tap repeatedly to detect
+                        it. TAP changes BPM only and does not enable the click.</li>
+                    <li style="margin-bottom: 4px;"><b>Click</b>: Enable or disable the metronome during recording and
+                        playback from the main screen.</li>
+                    <li style="margin-bottom: 4px;"><b>Pre-Count</b>: Enable the count-in from the main screen. It works
+                        with button, key, MIDI, and footswitch triggers.</li>
+                    <li style="margin-bottom: 4px;"><b>Rhythm &amp; Bars</b>: Set Bars, Beats, Pre-count Bars, audition the
+                        click, and edit accent (A) and regular (B) beats.</li>
                 </ul>
             </div>
 

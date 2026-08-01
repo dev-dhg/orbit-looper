@@ -45,20 +45,21 @@ A guitar looper audio plugin with a modern WebView UI. Record, layer, and loop w
 Orbit Looper features three distinct looping modes that change how loop length and overdubbing behave:
 
 - **Classic Mode** (Default) — Inspired by traditional stompbox loopers. The first layer you record defines the `Master Loop Length`. All subsequent overdubs automatically stop and switch back to playback when they hit this boundary, preventing accidental overwriting or "loop drift".
-- **Bars Mode** — Loop length is pre-determined by BPM and Bar settings configured in the Metronome panel. Works with the metronome click for precise, tempo-synced loops.
+- **Bars Mode** — Loop length is determined by BPM on the main screen plus Bars and Beats in Rhythm & Bars. Works with the metronome click for precise, tempo-synced loops.
 - **Dynamic Mode** — Inspired by experimental and software loopers. Overdubs extend the loop length dynamically until reaching the **Global Max Length** set in the Settings menu.
 
 ### Metronome / Click Track
 - **C++ DSP Metronome** — Sample-accurate click synthesized in the audio thread. Routes through your audio interface (not OS speakers)
-- **Time/Bars Mode** — Manual max loop length OR auto-calculated from BPM × Bars × Beats
-- **Rhythm Pattern Editor** — Step-sequencer-style matrix for accent/regular beat patterns (up to 16 beats per bar)
+- **Main Tempo Controls** — Direct BPM entry, Tap Tempo, Click, and Pre-count remain available while performing. Tap Tempo changes BPM without enabling Click
+- **Time/Bars Mode** — Loop length from the Global Max Length (Settings) OR auto-calculated from BPM × Bars × Beats
+- **Rhythm & Bars** — Advanced Bars, Beats, Pre-count Bars, click audition, and accent/regular beat-pattern controls
 - **Pre-Count** — Configurable count-in bars before recording starts. Works with all trigger methods (button, key, MIDI, footswitch)
 
 ### MIDI & Keyboard Control
 - **20 Mappable Actions** — Record, Overdub, Play, Stop, Clear, Undo, Footswitch, Monitor, Bar Mode, Click, Play Click, Pre-count, Arm Overdub, Loop Mode Cycle, Classic Mode, Beats Mode, Dynamic Mode, Pan Input Left/Center/Right
 - **MIDI Learn** — Press Learn, twist any CC on your controller
 - **Key Bindings** — Bind any keyboard key to any action. Auto-exclusive: one key per action
-- **Edge-Triggered CC** — Rising-edge detection (CC ≥ 64) for clean momentary footswitch/pedal use
+- **Edge-Triggered CC** — Rising-edge detection (any non-zero CC value) for clean momentary footswitch/pedal use, including 0/1-style controllers
 - **Input/Output Pan** — Precise L/R spatial positioning for both input monitoring and loop playback.
 
 ### Interface
@@ -66,7 +67,7 @@ Orbit Looper features three distinct looping modes that change how loop length a
 - **Resizable Window** — Drag to resize with locked aspect ratio. UI scales via CSS zoom
 - **Visual Feedback** — Ring flash on undo (orange) and clear (red), pulsing state text, beat highlighting
 - **Loop Timer** — Real-time elapsed position display inside the knob (M:SS.t format)
-- **Input/Output Gain & Pan** — 0–12 dB boost/cut and spatial control on input and output with visual sliders and rotary knobs.
+- **Input/Output Gain & Pan** — −60 to +12 dB gain and spatial control on input and output with visual sliders and rotary knobs.
 
 ---
 
@@ -242,12 +243,12 @@ For a complete walkthrough, see the [User Guide](docs/UserGuide.md).
 
 ### Metronome Setup (Bars Mode)
 
-1. Open the **Metronome** panel
-2. Toggle **BARS** mode
-3. Set **BPM**, **Bars**, and **Beats per Bar**
+1. Select **BARS** mode on the main screen
+2. Enter the **BPM** or use **TAP**
+3. Open **Rhythm & Bars** and set **Bars** and **Beats per Bar**
 4. Customize the rhythm pattern (accent/regular beats)
-5. Enable **Click** to hear the metronome
-6. Enable **Pre-count** for a count-in before recording
+5. Enable **Click** on the main screen to hear the metronome
+6. Enable **Pre-count** on the main screen and set **Pre-count Bars** in Rhythm & Bars
 
 ### MIDI / Key Mapping
 
@@ -270,7 +271,7 @@ For a complete walkthrough, see the [User Guide](docs/UserGuide.md).
 | Output Pan | L100–R100 | Center | Panning for output signal |
 
 ### Advanced Parameter Controls
-- **Double-Click** any parameter value (Gain, Max Length) to instantly reset it to its default setting.
+- **Double-Click** any parameter value (Gain, Loop Level) to instantly reset it to its default setting.
 - **Shift+Click** or **Alt+Click** any parameter value to open a manual text entry box for precise numerical input.
 
 > **⚠️ Memory Footprint Warning**

@@ -55,6 +55,12 @@ if(NOT juce_POPULATED)
         message(STATUS "Patching JUCE juceaide/CMakeLists.txt to bypass headless execution test...")
         set(JUCEAIDE_CMAKE "${juce_SOURCE_DIR}/extras/Build/juceaide/CMakeLists.txt")
         file(READ "${JUCEAIDE_CMAKE}" _juceaide_cmake)
+        # Guard: fail loudly if the expected pattern vanished (JUCE upgrade)
+        string(FIND "${_juceaide_cmake}" "message(FATAL_ERROR \"Testing juceaide failed:" _juceaide_pattern_pos)
+        string(FIND "${_juceaide_cmake}" "Testing juceaide failed (code:" _juceaide_already_patched)
+        if(_juceaide_pattern_pos EQUAL -1 AND _juceaide_already_patched EQUAL -1)
+            message(FATAL_ERROR "Orbit Looper: juceaide patch pattern not found — JUCE version changed? Update the string(REPLACE) in CMakeLists.txt.")
+        endif()
         string(REPLACE "message(FATAL_ERROR \"Testing juceaide failed:\\noutput: \${output}\")" "message(WARNING \"Testing juceaide failed (code: \${result_variable}):\\noutput: \${output}\")" _juceaide_cmake "${_juceaide_cmake}")
         file(WRITE "${JUCEAIDE_CMAKE}" "${_juceaide_cmake}")
 
@@ -65,6 +71,12 @@ if(NOT juce_POPULATED)
             message(STATUS "Patching JUCE JUCEUtils.cmake to use pre-built icon.ico...")
             set(JUCE_UTILS_CMAKE "${juce_SOURCE_DIR}/extras/Build/CMake/JUCEUtils.cmake")
             file(READ "${JUCE_UTILS_CMAKE}" _juce_utils)
+            # Guard: fail loudly if the expected pattern vanished (JUCE upgrade)
+            string(FIND "${_juce_utils}" "_juce_execute_juceaide(winicon" _winicon_pattern_pos)
+            string(FIND "${_juce_utils}" "Using pre-built icon.ico" _winicon_already_patched)
+            if(_winicon_pattern_pos EQUAL -1 AND _winicon_already_patched EQUAL -1)
+                message(FATAL_ERROR "Orbit Looper: JUCEUtils winicon patch pattern not found — JUCE version changed? Update the string(REPLACE) in CMakeLists.txt.")
+            endif()
             string(REPLACE
                 "set(generated_icon \"\${juce_library_code}/icon.ico\")\n        _juce_execute_juceaide(winicon \"\${generated_icon}\" \${icon_args})"
                 "set(generated_icon \"\${juce_library_code}/icon.ico\")\n        if(EXISTS \"${CMAKE_SOURCE_DIR}/assets/icon.ico\")\n            file(COPY \"${CMAKE_SOURCE_DIR}/assets/icon.ico\" DESTINATION \"\${juce_library_code}\")\n            message(STATUS \"Using pre-built icon.ico (skipping juceaide winicon)\")\n        else()\n            _juce_execute_juceaide(winicon \"\${generated_icon}\" \${icon_args})\n        endif()"
@@ -150,6 +162,7 @@ juce_add_binary_data(OrbitLooper_WebUI
         Source/ui/public/metronome.js
         Source/ui/public/keymapping.js
         Source/ui/public/main.js
+        Source/ui/public/mobile.js
 )
 
 # ============================================

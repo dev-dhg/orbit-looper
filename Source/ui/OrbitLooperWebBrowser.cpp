@@ -119,85 +119,46 @@ OrbitLooperWebBrowser::getResource(const juce::String &url) {
   DBG("OrbitLooper resource requested. URL=" + url + " path=" + resourcePath);
 #endif
 
-  const char *resourceData = nullptr;
-  int resourceSize = 0;
-  juce::String mimeType;
-
   auto path = resourcePath.substring(1);
 
   if (path.isEmpty())
     path = "index.html";
 
-#if JUCE_ANDROID
-  if (path == "mobile-index.html") {
-    resourceData = BinaryData::mobileindex_html;
-    resourceSize = BinaryData::mobileindex_htmlSize;
-    mimeType = "text/html";
-  } else
-#endif
-  if (path == "index.html" || path.endsWithIgnoreCase(".html")) {
-    path = "index.html";
-    resourceData = BinaryData::index_html;
-    resourceSize = BinaryData::index_htmlSize;
-    mimeType = "text/html";
-  } else if (path == "style.css") {
-    resourceData = BinaryData::style_css;
-    resourceSize = BinaryData::style_cssSize;
-    mimeType = "text/css";
-  } else if (path == "juce-bridge.js") {
-    resourceData = BinaryData::jucebridge_js;
-    resourceSize = BinaryData::jucebridge_jsSize;
-    mimeType = "text/javascript";
-  } else if (path == "state.js") {
-    resourceData = BinaryData::state_js;
-    resourceSize = BinaryData::state_jsSize;
-    mimeType = "text/javascript";
-  } else if (path == "ui-controls.js") {
-    resourceData = BinaryData::uicontrols_js;
-    resourceSize = BinaryData::uicontrols_jsSize;
-    mimeType = "text/javascript";
-  } else if (path == "transport.js") {
-    resourceData = BinaryData::transport_js;
-    resourceSize = BinaryData::transport_jsSize;
-    mimeType = "text/javascript";
-  } else if (path == "metronome.js") {
-    resourceData = BinaryData::metronome_js;
-    resourceSize = BinaryData::metronome_jsSize;
-    mimeType = "text/javascript";
-  } else if (path == "keymapping.js") {
-    resourceData = BinaryData::keymapping_js;
-    resourceSize = BinaryData::keymapping_jsSize;
-    mimeType = "text/javascript";
-  } else if (path == "main.js") {
-    resourceData = BinaryData::main_js;
-    resourceSize = BinaryData::main_jsSize;
-    mimeType = "text/javascript";
-  }
+  // Look the file up in the embedded BinaryData by its original filename —
+  // no hardcoded per-file mapping needed.
+  auto findResource = [](const juce::String &fileName)
+      -> std::optional<juce::WebBrowserComponent::Resource> {
+    for (int i = 0; i < BinaryData::namedResourceListSize; ++i) {
+      if (fileName == BinaryData::originalFilenames[i]) {
+        int dataSize = 0;
+        if (const char *data = BinaryData::getNamedResource(
+                BinaryData::namedResourceList[i], dataSize)) {
+          auto bytes = std::vector<std::byte>(
+              reinterpret_cast<const std::byte *>(data),
+              reinterpret_cast<const std::byte *>(data) + dataSize);
+          return juce::WebBrowserComponent::Resource{
+              std::move(bytes), getMimeForExtension(getExtension(fileName))};
+        }
+      }
+    }
+    return std::nullopt;
+  };
 
-  if (resourceData != nullptr) {
-    auto data = std::vector<std::byte>(
-        reinterpret_cast<const std::byte *>(resourceData),
-        reinterpret_cast<const std::byte *>(resourceData) + resourceSize);
-    return juce::WebBrowserComponent::Resource{std::move(data),
-                                               mimeType.toStdString()};
-  }
+  if (auto resource = findResource(path))
+    return resource;
 
-  juce::String errorHtml =
-      "<html><body><h1>404 - Not Found</h1><p>Resource: " + path +
-      "</p></body></html>";
-  auto errorData = std::vector<std::byte>(
-      reinterpret_cast<const std::byte *>(errorHtml.toRawUTF8()),
-      reinterpret_cast<const std::byte *>(errorHtml.toRawUTF8()) +
-          errorHtml.getNumBytesAsUTF8());
-  return juce::WebBrowserComponent::Resource{std::move(errorData), "text/html"};
+  // Deep-link fallback: serve unknown .html requests as the main page
+  if (path.endsWithIgnoreCase(".html"))
+    return findResource("index.html");
+
+  return std::nullopt; // 404
 }
 
 juce::WebBrowserComponent::Options OrbitLooperWebBrowser::createOptions(
     OrbitLooperAudioProcessor &p, OrbitLooperAudioProcessorEditor *e,
-    juce::WebSliderRelay &loopLevel, juce::WebSliderRelay &maxLoopLength,
-    juce::WebSliderRelay &inputGain, juce::WebSliderRelay &outputGain,
-    juce::WebSliderRelay &inputPan, juce::WebSliderRelay &outputPan,
-    OrbitLooperWebBrowser *browserInstance) {
+    juce::WebSliderRelay &loopLevel, juce::WebSliderRelay &inputGain,
+    juce::WebSliderRelay &outputGain, juce::WebSliderRelay &inputPan,
+    juce::WebSliderRelay &outputPan, OrbitLooperWebBrowser *browserInstance) {
   auto options =
       juce::WebBrowserComponent::Options{}
 #if JUCE_WINDOWS
@@ -214,7 +175,6 @@ juce::WebBrowserComponent::Options OrbitLooperWebBrowser::createOptions(
             return browserInstance->getResource(url);
           })
           .withOptionsFrom(loopLevel)
-          .withOptionsFrom(maxLoopLength)
           .withOptionsFrom(inputGain)
           .withOptionsFrom(outputGain)
           .withOptionsFrom(inputPan)
@@ -247,215 +207,8 @@ juce::WebBrowserComponent::Options OrbitLooperWebBrowser::createOptions(
                                browserInstance->triggerExportDialog();
                              })
 
-          .withEventListener(
-              "midiLearnRecord",
-              [&p](const juce::var &) {
-                p.startMidiLearn(OrbitLooperAudioProcessor::MidiAction::Record);
-              })
-          .withEventListener("midiLearnStop",
-                             [&p](const juce::var &) {
-                               p.startMidiLearn(
-                                   OrbitLooperAudioProcessor::MidiAction::Stop);
-                             })
-          .withEventListener(
-              "midiLearnClear",
-              [&p](const juce::var &) {
-                p.startMidiLearn(OrbitLooperAudioProcessor::MidiAction::Clear);
-              })
-          .withEventListener("midiLearnUndo",
-                             [&p](const juce::var &) {
-                               p.startMidiLearn(
-                                   OrbitLooperAudioProcessor::MidiAction::Undo);
-                             })
-          .withEventListener(
-              "midiLearnFootswitch",
-              [&p](const juce::var &) {
-                p.startMidiLearn(
-                    OrbitLooperAudioProcessor::MidiAction::Footswitch);
-              })
-          .withEventListener(
-              "midiLearnOverdub",
-              [&p](const juce::var &) {
-                p.startMidiLearn(
-                    OrbitLooperAudioProcessor::MidiAction::Overdub);
-              })
-          .withEventListener(
-              "midiLearnBarMode",
-              [&p](const juce::var &) {
-                p.startMidiLearn(
-                    OrbitLooperAudioProcessor::MidiAction::BarMode);
-              })
-          .withEventListener(
-              "midiLearnClick",
-              [&p](const juce::var &) {
-                p.startMidiLearn(OrbitLooperAudioProcessor::MidiAction::Click);
-              })
-          .withEventListener(
-              "midiLearnPreCount",
-              [&p](const juce::var &) {
-                p.startMidiLearn(
-                    OrbitLooperAudioProcessor::MidiAction::PreCount);
-              })
-          .withEventListener(
-              "midiLearnArmOverdub",
-              [&p](const juce::var &) {
-                p.startMidiLearn(
-                    OrbitLooperAudioProcessor::MidiAction::ArmOverdub);
-              })
-          .withEventListener(
-              "midiLearnPlayClick",
-              [&p](const juce::var &) {
-                p.startMidiLearn(
-                    OrbitLooperAudioProcessor::MidiAction::PlayClick);
-              })
-          .withEventListener("midiLearnPlay",
-                             [&p](const juce::var &) {
-                               p.startMidiLearn(
-                                   OrbitLooperAudioProcessor::MidiAction::Play);
-                             })
-          .withEventListener("midiLearnMonitor",
-                             [&p](const juce::var &) {
-                               p.startMidiLearn(OrbitLooperAudioProcessor::
-                                                    MidiAction::Monitor);
-                             })
-          .withEventListener("midiLearnLoopModeCycle",
-                             [&p](const juce::var &) {
-                               p.startMidiLearn(OrbitLooperAudioProcessor::
-                                                    MidiAction::LoopModeCycle);
-                             })
-          .withEventListener("midiLearnClassicMode",
-                             [&p](const juce::var &) {
-                               p.startMidiLearn(OrbitLooperAudioProcessor::
-                                                    MidiAction::ClassicMode);
-                             })
-          .withEventListener("midiLearnBeatsMode",
-                             [&p](const juce::var &) {
-                               p.startMidiLearn(OrbitLooperAudioProcessor::
-                                                    MidiAction::BeatsMode);
-                             })
-          .withEventListener("midiLearnDynamicMode",
-                             [&p](const juce::var &) {
-                               p.startMidiLearn(OrbitLooperAudioProcessor::
-                                                    MidiAction::DynamicMode);
-                             })
-          .withEventListener("midiLearnPanInputLeft",
-                             [&p](const juce::var &) {
-                               p.startMidiLearn(OrbitLooperAudioProcessor::
-                                                    MidiAction::PanInputLeft);
-                             })
-          .withEventListener("midiLearnPanInputCenter",
-                             [&p](const juce::var &) {
-                               p.startMidiLearn(OrbitLooperAudioProcessor::
-                                                    MidiAction::PanInputCenter);
-                             })
-          .withEventListener("midiLearnPanInputRight",
-                             [&p](const juce::var &) {
-                               p.startMidiLearn(OrbitLooperAudioProcessor::
-                                                    MidiAction::PanInputRight);
-                             })
           .withEventListener("midiLearnCancel",
                              [&p](const juce::var &) { p.cancelMidiLearn(); })
-
-          .withEventListener("midiClearRecord",
-                             [&p](const juce::var &) {
-                               p.clearMidiCC(OrbitLooperAudioProcessor::
-                                                 MidiAction::Record);
-                             })
-          .withEventListener("midiClearStop",
-                             [&p](const juce::var &) {
-                               p.clearMidiCC(
-                                   OrbitLooperAudioProcessor::MidiAction::Stop);
-                             })
-          .withEventListener("midiClearClear",
-                             [&p](const juce::var &) {
-                               p.clearMidiCC(OrbitLooperAudioProcessor::
-                                                 MidiAction::Clear);
-                             })
-          .withEventListener("midiClearUndo",
-                             [&p](const juce::var &) {
-                               p.clearMidiCC(
-                                   OrbitLooperAudioProcessor::MidiAction::Undo);
-                             })
-          .withEventListener("midiClearFootswitch",
-                             [&p](const juce::var &) {
-                               p.clearMidiCC(OrbitLooperAudioProcessor::
-                                                 MidiAction::Footswitch);
-                             })
-          .withEventListener("midiClearOverdub",
-                             [&p](const juce::var &) {
-                               p.clearMidiCC(OrbitLooperAudioProcessor::
-                                                 MidiAction::Overdub);
-                             })
-          .withEventListener("midiClearBarMode",
-                             [&p](const juce::var &) {
-                               p.clearMidiCC(OrbitLooperAudioProcessor::
-                                                 MidiAction::BarMode);
-                             })
-          .withEventListener("midiClearClick",
-                             [&p](const juce::var &) {
-                               p.clearMidiCC(OrbitLooperAudioProcessor::
-                                                 MidiAction::Click);
-                             })
-          .withEventListener("midiClearPreCount",
-                             [&p](const juce::var &) {
-                               p.clearMidiCC(OrbitLooperAudioProcessor::
-                                                 MidiAction::PreCount);
-                             })
-          .withEventListener("midiClearArmOverdub",
-                             [&p](const juce::var &) {
-                               p.clearMidiCC(OrbitLooperAudioProcessor::
-                                                 MidiAction::ArmOverdub);
-                             })
-          .withEventListener("midiClearPlayClick",
-                             [&p](const juce::var &) {
-                               p.clearMidiCC(OrbitLooperAudioProcessor::
-                                                 MidiAction::PlayClick);
-                             })
-          .withEventListener("midiClearPlay",
-                             [&p](const juce::var &) {
-                               p.clearMidiCC(
-                                   OrbitLooperAudioProcessor::MidiAction::Play);
-                             })
-          .withEventListener("midiClearMonitor",
-                             [&p](const juce::var &) {
-                               p.clearMidiCC(OrbitLooperAudioProcessor::
-                                                 MidiAction::Monitor);
-                             })
-          .withEventListener("midiClearLoopModeCycle",
-                             [&p](const juce::var &) {
-                               p.clearMidiCC(OrbitLooperAudioProcessor::
-                                                 MidiAction::LoopModeCycle);
-                             })
-          .withEventListener("midiClearClassicMode",
-                             [&p](const juce::var &) {
-                               p.clearMidiCC(OrbitLooperAudioProcessor::
-                                                 MidiAction::ClassicMode);
-                             })
-          .withEventListener("midiClearBeatsMode",
-                             [&p](const juce::var &) {
-                               p.clearMidiCC(OrbitLooperAudioProcessor::
-                                                 MidiAction::BeatsMode);
-                             })
-          .withEventListener("midiClearDynamicMode",
-                             [&p](const juce::var &) {
-                               p.clearMidiCC(OrbitLooperAudioProcessor::
-                                                 MidiAction::DynamicMode);
-                             })
-          .withEventListener("midiClearPanInputLeft",
-                             [&p](const juce::var &) {
-                               p.clearMidiCC(OrbitLooperAudioProcessor::
-                                                 MidiAction::PanInputLeft);
-                             })
-          .withEventListener("midiClearPanInputCenter",
-                             [&p](const juce::var &) {
-                               p.clearMidiCC(OrbitLooperAudioProcessor::
-                                                 MidiAction::PanInputCenter);
-                             })
-          .withEventListener("midiClearPanInputRight",
-                             [&p](const juce::var &) {
-                               p.clearMidiCC(OrbitLooperAudioProcessor::
-                                                 MidiAction::PanInputRight);
-                             })
 
           .withEventListener("keyBindSet",
                              [&p](const juce::var &args) {
@@ -538,12 +291,6 @@ juce::WebBrowserComponent::Options OrbitLooperWebBrowser::createOptions(
                             static_cast<float>(modeIdx)));
                 }
               })
-          .withEventListener("setAutoLength",
-                             [&p](const juce::var &args) {
-                               if (args.isArray() && args.size() >= 1)
-                                 p.isAutoLength.store(
-                                     static_cast<int>(args[0]) != 0);
-                             })
           .withEventListener("setGlobalMaxLength",
                              [&p](const juce::var &args) {
                                if (args.isArray() && args.size() >= 1)
@@ -686,11 +433,9 @@ juce::WebBrowserComponent::Options OrbitLooperWebBrowser::createOptions(
                                  p.muteOnStartup.store(val);
                                  DBG("OrbitLooper: setMuteOnStartup = " + juce::String(val ? "true" : "false"));
                                  // Persist to PropertiesFile
-                                 juce::PropertiesFile::Options opts;
-                                 opts.applicationName = "OrbitLooper";
-                                 opts.folderName = "OrbitLooper";
-                                 opts.filenameSuffix = ".settings";
-                                 juce::PropertiesFile props(opts);
+                                 juce::PropertiesFile props(
+                                     OrbitLooperAudioProcessorEditor::
+                                         makeSettingsOptions());
                                  props.setValue("muteOnStartup", val);
                                  bool saved = props.save();
                                  DBG("OrbitLooper: PropertiesFile save() = " + juce::String(saved ? "OK" : "FAILED")
@@ -701,8 +446,12 @@ juce::WebBrowserComponent::Options OrbitLooperWebBrowser::createOptions(
           .withEventListener("btClassicScan",
                              [browserInstance](const juce::var &) {
                                auto json = BluetoothClassicMidi::getPairedDevicesJson();
+                               // Pass as an escaped string literal; JS side
+                               // JSON.parses strings (injection-safe even if
+                               // a device name contains quotes).
                                browserInstance->evaluateJavascript(
-                                   "window.updateBtClassicDevices(" + json + ")");
+                                   "window.updateBtClassicDevices(" +
+                                   OrbitLooperAudioProcessorEditor::jsQuoted(json) + ")");
                              })
           .withEventListener("btClassicConnect",
                              [](const juce::var &args) {
@@ -726,17 +475,37 @@ juce::WebBrowserComponent::Options OrbitLooperWebBrowser::createOptions(
               e->setWebUiReady(true);
           });
 
+  // Table-driven registration of the per-action MIDI Learn/Clear listeners
+  // ("midiLearn<Action>" / "midiClear<Action>") — replaces 40 hand-written
+  // listeners with one loop over the shared action-name table.
+  {
+    const auto &actionNames = OrbitLooperAudioProcessor::getMidiActionNames();
+    for (int i = 0; i < OrbitLooperAudioProcessor::NUM_MIDI_ACTIONS; ++i) {
+      const auto action =
+          static_cast<OrbitLooperAudioProcessor::MidiAction>(i);
+      const juce::String name(actionNames[static_cast<size_t>(i)]);
+      options =
+          options
+              .withEventListener(
+                  "midiLearn" + name,
+                  [&p, action](const juce::var &) { p.startMidiLearn(action); })
+              .withEventListener(
+                  "midiClear" + name,
+                  [&p, action](const juce::var &) { p.clearMidiCC(action); });
+    }
+  }
+
   return options;
 }
 
 OrbitLooperWebBrowser::OrbitLooperWebBrowser(
     OrbitLooperAudioProcessor &p, OrbitLooperAudioProcessorEditor *e,
-    juce::WebSliderRelay &loopLevel, juce::WebSliderRelay &maxLoopLength,
-    juce::WebSliderRelay &inputGain, juce::WebSliderRelay &outputGain,
-    juce::WebSliderRelay &inputPan, juce::WebSliderRelay &outputPan)
-    : juce::WebBrowserComponent(createOptions(p, e, loopLevel, maxLoopLength,
-                                              inputGain, outputGain, inputPan,
-                                              outputPan, this)),
+    juce::WebSliderRelay &loopLevel, juce::WebSliderRelay &inputGain,
+    juce::WebSliderRelay &outputGain, juce::WebSliderRelay &inputPan,
+    juce::WebSliderRelay &outputPan)
+    : juce::WebBrowserComponent(createOptions(p, e, loopLevel, inputGain,
+                                              outputGain, inputPan, outputPan,
+                                              this)),
       audioProcessor(p), editor(e) {}
 
 OrbitLooperWebBrowser::~OrbitLooperWebBrowser() {}

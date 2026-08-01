@@ -245,7 +245,7 @@ Java_com_orbitlooper_BluetoothClassicMidiService_nativeOnClassicMidiMessage (
     }
 
     // Push into the lock-free queue (no mutex, no heap alloc — Req 9.2).
-    gBtClassicMidiQueue.pushOrDropOldest (
+    gBtClassicMidiQueue.pushOrDrop (
         reinterpret_cast<const uint8_t*> (buf), static_cast<int> (len));
 }
 

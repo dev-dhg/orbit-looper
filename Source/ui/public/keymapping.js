@@ -156,6 +156,28 @@ function getKeyCode(e) {
     return fallbacks[k] || k;
 }
 
+// ========== KEYBOARD ACTION DISPATCH TABLE ==========
+// Actions with dedicated behavior; anything not listed here falls back to
+// emitEvent(ACTION_EVENTS[i]). Index 4 (footswitch) is gesture-based and
+// handled separately in the keydown/keyup listeners.
+var KEY_ACTION_HANDLERS = {
+    0: function () { handleRecordAction(); },
+    1: function () { if (isPreCounting) cancelPreCount(); else emitEvent('looperStop'); },
+    6: function () { modeToggle.click(); },
+    7: function () { clickToggle.click(); },
+    8: function () { preCountToggle.click(); },
+    9: function () { window.toggleArmOverdub(); },
+    10: function () { playClickBtn.click(); },
+    12: function () { window.toggleMonitor(); },
+    13: function () { window.toggleLoopModeCycle(); },
+    14: function () { setLoopMode(0); },
+    15: function () { setLoopMode(1); },
+    16: function () { setLoopMode(2); },
+    17: function () { if (inputPanSliderState) inputPanSliderState.setNormalisedValue(0.0); },
+    18: function () { if (inputPanSliderState) inputPanSliderState.setNormalisedValue(0.5); },
+    19: function () { if (inputPanSliderState) inputPanSliderState.setNormalisedValue(1.0); }
+};
+
 document.addEventListener('keydown', function (e) {
     if (keyLearning && keyLearnTarget >= 0) {
         e.preventDefault();
@@ -168,52 +190,19 @@ document.addEventListener('keydown', function (e) {
         return;
     }
 
-    for (var i = 0; i < 20; i++) {
+    for (var i = 0; i < NUM_ACTIONS; i++) {
         if (keyBindingsMap[i] && keyBindingsMap[i] === getKeyCode(e)) {
             e.preventDefault();
             if (i === 4) {
+                // Footswitch: gesture press-down (release handled on keyup)
                 if (!e.repeat && !footswitchKeyHeld) {
                     footswitchKeyHeld = true;
                     emitEvent('looperFootswitchDown');
                 }
-            } else if (i === 0) {
-                if (!e.repeat) handleRecordAction();
-            } else if (i === 1 && isPreCounting) {
-                if (!e.repeat) cancelPreCount();
-            } else if (i === 5) {
-                if (!e.repeat) emitEvent('looperOverdub');
-            } else if (i === 6) {
-                if (!e.repeat) modeToggle.click();
-            } else if (i === 7) {
-                if (!e.repeat) clickToggle.click();
-            } else if (i === 8) {
-                if (!e.repeat) preCountToggle.click();
-            } else if (i === 9) {
-                if (!e.repeat) window.toggleArmOverdub();
-            } else if (i === 10) {
-                if (!e.repeat) playClickBtn.click();
-            } else if (i === 11) {
-                if (!e.repeat) emitEvent('looperPlay');
-            } else if (i === 12) {
-                if (!e.repeat) window.toggleMonitor();
-            } else if (i === 13) {
-                if (!e.repeat) window.toggleLoopModeCycle();
-            } else if (i === 14) {
-                if (!e.repeat) setLoopMode(0);
-            } else if (i === 15) {
-                if (!e.repeat) setLoopMode(1);
-            } else if (i === 16) {
-                if (!e.repeat) setLoopMode(2);
-            } else if (i === 17) {
-                if (!e.repeat && inputPanSliderState) inputPanSliderState.setNormalisedValue(0.0);
-            } else if (i === 18) {
-                if (!e.repeat && inputPanSliderState) inputPanSliderState.setNormalisedValue(0.5);
-            } else if (i === 19) {
-                if (!e.repeat && inputPanSliderState) inputPanSliderState.setNormalisedValue(1.0);
-            } else {
-                if (!e.repeat) {
-                    emitEvent(ACTION_EVENTS[i]);
-                }
+            } else if (!e.repeat) {
+                var handler = KEY_ACTION_HANDLERS[i];
+                if (handler) handler();
+                else if (ACTION_EVENTS[i]) emitEvent(ACTION_EVENTS[i]);
             }
             return;
         }

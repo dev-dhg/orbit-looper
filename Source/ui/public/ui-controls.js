@@ -57,21 +57,6 @@ function makeEditable(el, parser, onChange, defaultSnapValue) {
     });
 }
 
-function parseTimeStr(txt) {
-    if (txt.includes(':')) {
-        var parts = txt.split(':');
-        if (parts.length === 3) {
-            return (parseFloat(parts[0]) || 0) * 60 + (parseFloat(parts[1]) || 0) + (parseFloat(parts[2]) || 0) / 100;
-        } else if (parts.length === 2) {
-            return (parseFloat(parts[0]) || 0) * 60 + (parseFloat(parts[1]) || 0);
-        }
-    }
-    var val = parseFloat(txt);
-    if (isNaN(val)) return null;
-    if (txt.includes('m')) return val * 60;
-    return val;
-}
-
 function parseDbStr(txt) {
     if (!txt || txt === '') return 0;
     var val = parseFloat(txt);
@@ -131,19 +116,6 @@ function updateLoopLevelDisplay() {
     loopLevelFill.style.width = pct + '%';
     loopLevelThumb.style.left = pct + '%';
     loopLevelValueEl.textContent = Math.round(loopLevel);
-}
-
-// ========== MAX LOOP LENGTH SLIDER ==========
-function updateMaxLengthDisplay() {
-    if (!maxLengthFill || !maxLengthThumb || !maxLengthValue) return;
-    var pct = ((maxLengthSec - MAX_LENGTH_MIN) / (MAX_LENGTH_MAX - MAX_LENGTH_MIN)) * 100;
-    maxLengthFill.style.width = pct + '%';
-    maxLengthThumb.style.left = pct + '%';
-
-    var m = Math.floor(maxLengthSec / 60);
-    var s = Math.floor(maxLengthSec % 60);
-    var ms = Math.floor((maxLengthSec % 1) * 100);
-    maxLengthValue.textContent = String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0') + ':' + String(ms).padStart(2, '0');
 }
 
 // ========== GAIN SLIDER SETUP ==========
@@ -234,7 +206,6 @@ function initJuceBridge() {
     }
     try {
         loopLevelSliderState = window.Juce.getSliderState("loop_level");
-        maxLoopLengthSliderState = window.Juce.getSliderState("max_loop_length");
 
         if (loopLevelSliderState) {
             loopLevelSliderState.addValueChangedListener(function () {
@@ -244,15 +215,6 @@ function initJuceBridge() {
             });
             loopLevel = loopLevelSliderState.getScaledValue();
             updateLoopLevelDisplay();
-        }
-        if (maxLoopLengthSliderState) {
-            maxLoopLengthSliderState.addValueChangedListener(function () {
-                if (isDraggingMaxLength) return;
-                maxLengthSec = maxLoopLengthSliderState.getScaledValue();
-                updateMaxLengthDisplay();
-            });
-            maxLengthSec = maxLoopLengthSliderState.getScaledValue();
-            updateMaxLengthDisplay();
         }
 
         inputGainSliderState = window.Juce.getSliderState("input_gain");
@@ -318,31 +280,6 @@ makeEditable(loopLevelValueEl, parseDbStr, function (val) {
     updateLoopLevelDisplay();
 }, 95);
 
-makeEditable(maxLengthValue, parseTimeStr, function (val) {
-    if (val > 300) {
-        showCustomConfirm("High Memory Usage Warning",
-            "Setting a Max Length over 5 minutes will require significant active system RAM to allocate the 8 loop layers (e.g. 5 mins ≈ 0.9 GB, 20 mins ≈ 3.7 GB).\n\nAre you sure you want to allocate this much memory?",
-            function () {
-                maxLengthSec = Math.max(MAX_LENGTH_MIN, Math.min(MAX_LENGTH_MAX, val));
-                if (maxLoopLengthSliderState) {
-                    var pct = (maxLengthSec - MAX_LENGTH_MIN) / (MAX_LENGTH_MAX - MAX_LENGTH_MIN);
-                    maxLoopLengthSliderState.setNormalisedValue(pct);
-                    maxLoopLengthSliderState.sliderDragEnded();
-                }
-                updateMaxLengthDisplay();
-            }
-        );
-        return;
-    }
-    maxLengthSec = Math.max(MAX_LENGTH_MIN, Math.min(MAX_LENGTH_MAX, val));
-    if (maxLoopLengthSliderState) {
-        var pct = (maxLengthSec - MAX_LENGTH_MIN) / (MAX_LENGTH_MAX - MAX_LENGTH_MIN);
-        maxLoopLengthSliderState.setNormalisedValue(pct);
-        maxLoopLengthSliderState.sliderDragEnded();
-    }
-    updateMaxLengthDisplay();
-}, 0);
-
 // ========== WIRE UP GAIN SLIDERS ==========
 setupGainSlider(inputGainSlider, 'input');
 setupGainSlider(outputGainSlider, 'output');
@@ -380,51 +317,3 @@ document.addEventListener('pointerup', function () {
     if (isDraggingLoopLevel) { isDraggingLoopLevel = false; if (loopLevelSliderState) loopLevelSliderState.sliderDragEnded(); }
 });
 
-// ========== MAX LENGTH SLIDER DRAG ==========
-if (maxLengthSlider) {
-    maxLengthSlider.addEventListener('pointerdown', function (e) {
-        isDraggingMaxLength = true;
-        var rect = maxLengthSlider.getBoundingClientRect();
-        var pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-        maxLengthSec = MAX_LENGTH_MIN + pct * (MAX_LENGTH_MAX - MAX_LENGTH_MIN);
-        updateMaxLengthDisplay();
-        maxLengthSlider.setPointerCapture(e.pointerId);
-        if (maxLoopLengthSliderState) { maxLoopLengthSliderState.sliderDragStarted(); maxLoopLengthSliderState.setNormalisedValue(pct); }
-        e.preventDefault();
-    });
-
-    document.addEventListener('pointermove', function (e) {
-        if (!isDraggingMaxLength) return;
-        var rect = maxLengthSlider.getBoundingClientRect();
-        var pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-        maxLengthSec = MAX_LENGTH_MIN + pct * (MAX_LENGTH_MAX - MAX_LENGTH_MIN);
-        updateMaxLengthDisplay();
-        if (maxLoopLengthSliderState) maxLoopLengthSliderState.setNormalisedValue(pct);
-    });
-
-    document.addEventListener('pointerup', function () {
-        if (!isDraggingMaxLength) return;
-        isDraggingMaxLength = false;
-        if (maxLengthSec > 300) {
-            showCustomConfirm("High Memory Usage Warning",
-                "Setting a Max Length over 5 minutes will require significant active system RAM to allocate the 8 loop layers (e.g. 5 mins ≈ 0.9 GB, 20 mins ≈ 3.7 GB).\n\nAre you sure you want to allocate this much memory?",
-                function () {
-                    if (maxLoopLengthSliderState) maxLoopLengthSliderState.sliderDragEnded();
-                }
-            );
-
-            var cancelBtn = document.getElementById('confirmCancelBtn');
-            var handleCancel = function () {
-                maxLengthSec = 300;
-                updateMaxLengthDisplay();
-                if (maxLoopLengthSliderState) maxLoopLengthSliderState.setNormalisedValue((300 - MAX_LENGTH_MIN) / (MAX_LENGTH_MAX - MAX_LENGTH_MIN));
-                if (maxLoopLengthSliderState) maxLoopLengthSliderState.sliderDragEnded();
-                cancelBtn.removeEventListener('click', handleCancel);
-            };
-            cancelBtn.addEventListener('click', handleCancel);
-
-        } else {
-            if (maxLoopLengthSliderState) maxLoopLengthSliderState.sliderDragEnded();
-        }
-    });
-}

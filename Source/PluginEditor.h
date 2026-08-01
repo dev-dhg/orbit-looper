@@ -34,6 +34,15 @@ public:
 
   void setWebUiReady(bool ready);
 
+  // Shared PropertiesFile options for all OrbitLooper persistent settings
+  // (also used by OrbitLooperWebBrowser).
+  static juce::PropertiesFile::Options makeSettingsOptions();
+
+  // Escape an arbitrary string into a double-quoted JS string literal
+  // (JSON escaping) — use for ALL dynamic strings embedded in
+  // evaluateJavascript to prevent breakage/injection.
+  static juce::String jsQuoted(const juce::String &s);
+
 private:
   //==============================================================================
   // CRITICAL: MEMBER DECLARATION ORDER
@@ -42,7 +51,6 @@ private:
 
   // 1. PARAMETER RELAYS (Destroyed last)
   juce::WebSliderRelay loopLevelRelay{"loop_level"};
-  juce::WebSliderRelay maxLoopLengthRelay{"max_loop_length"};
   juce::WebSliderRelay inputGainRelay{"input_gain"};
   juce::WebSliderRelay outputGainRelay{"output_gain"};
   juce::WebSliderRelay inputPanRelay{"input_pan"};
@@ -53,7 +61,6 @@ private:
 
   // 3. PARAMETER ATTACHMENTS (Destroyed first)
   std::unique_ptr<juce::WebSliderParameterAttachment> loopLevelAttachment;
-  std::unique_ptr<juce::WebSliderParameterAttachment> maxLoopLengthAttachment;
   std::unique_ptr<juce::WebSliderParameterAttachment> inputGainAttachment;
   std::unique_ptr<juce::WebSliderParameterAttachment> outputGainAttachment;
   std::unique_ptr<juce::WebSliderParameterAttachment> inputPanAttachment;
@@ -77,12 +84,27 @@ private:
   juce::String btClassicLastDeviceMac; // MAC loaded from PropertiesFile at startup
   juce::String btClassicLastPersistedMac; // Last MAC we wrote to PropertiesFile (avoid repeated writes)
 
+  // timerCallback sub-tasks (30 Hz, message thread)
+  void pushLooperState();
+  void pushMidiState();
+  void consumeUiToggleFlags();
+  void pushKeyBindings();
+  void pushMetronomeBeat();
+  void pushMidiActivity();
+#if JUCE_ANDROID
+  void androidTimerTasks();
+#endif
+
 #if JUCE_ANDROID
   // Android: periodic state save (every ~5s) because the OS can kill the app
   // without calling destructors when swiped away or backgrounded.
   int64_t lastStateSaveMs = 0;
   static constexpr int64_t STATE_SAVE_INTERVAL_MS = 5000;
   bool bufferOptimizeDone = false; // One-shot: set lowest buffer on first launch
+  // Native JUCE banner hide: only scan for a short window after startup or a
+  // mute-state change instead of every timer tick forever.
+  int bannerScanTicksRemaining = 90; // ~3s at 30Hz
+  bool lastFeedbackMuted = true;     // Re-arm scan when this changes
 #endif
 
   //==============================================================================

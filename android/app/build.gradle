@@ -24,6 +24,7 @@ android {
             def ks = file("${System.properties['user.home']}${File.separator}.android${File.separator}debug.keystore")
             if (!ks.exists()) {
                 // Generate debug keystore on CI where none exists
+                println "OrbitLooper: no debug keystore found — auto-generating ${ks.absolutePath} (CI/debug signing only, NOT for production)"
                 def cmd = ["keytool", "-genkey", "-v",
                            "-keystore", ks.absolutePath,
                            "-storepass", "android",

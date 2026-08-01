@@ -40,9 +40,8 @@ public:
     MidiSpscQueue() : head (0), tail (0) {}
 
     /** Producer: push a MIDI message into the queue.
-     *  Returns false if the queue is full. The caller is responsible for
-     *  advancing the tail (dropping the oldest message) and retrying.
-     *  See pushOrDropOldest() for the convenience wrapper.
+     *  Returns false if the queue is full (message dropped).
+     *  See pushOrDrop() for the convenience wrapper.
      */
     bool push (const uint8_t* msgData, int msgSize)
     {
@@ -61,17 +60,18 @@ public:
         return true;
     }
 
-    /** Producer convenience: push a message, dropping the oldest if full.
-     *  Implements Requirement 5.5 — never blocks the JNI callback thread.
+    /** Producer convenience: push a message, dropping the INCOMING message
+     *  when the queue is full. Never blocks the JNI callback thread.
+     *
+     *  Note: a previous drop-oldest variant advanced `tail` from the producer
+     *  thread, racing the consumer's `tail` update in pop(). In a SPSC queue
+     *  only the consumer may write `tail`; dropping the newest message keeps
+     *  the invariant (overflow only happens if the audio thread has stalled
+     *  for 256+ messages anyway).
      */
-    void pushOrDropOldest (const uint8_t* msgData, int msgSize)
+    void pushOrDrop (const uint8_t* msgData, int msgSize)
     {
-        if (! push (msgData, msgSize))
-        {
-            // Advance tail to discard oldest unread message
-            tail.store (tail.load (std::memory_order_relaxed) + 1, std::memory_order_release);
-            push (msgData, msgSize);
-        }
+        (void) push (msgData, msgSize);
     }
 
     /** Consumer: pop the oldest message from the queue.

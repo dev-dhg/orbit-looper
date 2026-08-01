@@ -12,6 +12,72 @@ function sendPatternBits() {
     emitEventWithArgs('metroSetPatterns', [accentBits, regularBits]);
 }
 
+// ========== TEMPO CONTROLS ==========
+function setBpm(value) {
+    var nextBpm = Math.round(Number(value));
+    if (!Number.isFinite(nextBpm)) nextBpm = 120;
+
+    bpm = Math.max(30, Math.min(300, nextBpm));
+    bpmInput.value = bpm;
+    emitEventWithArgs('metroSetBPM', [bpm]);
+    updateBarModeDuration();
+}
+
+window.setBpm = setBpm;
+
+var tapIntervals = [];
+var lastTapTime = 0;
+var tapFeedbackTimer = null;
+
+function getMedianInterval(intervals) {
+    var sortedIntervals = intervals.slice().sort(function (first, second) {
+        return first - second;
+    });
+    var middle = Math.floor(sortedIntervals.length / 2);
+    if (sortedIntervals.length % 2 === 1) return sortedIntervals[middle];
+    return (sortedIntervals[middle - 1] + sortedIntervals[middle]) / 2;
+}
+
+function showTapFeedback() {
+    tapTempoButton.classList.remove('tapped');
+    void tapTempoButton.offsetWidth;
+    tapTempoButton.classList.add('tapped');
+    clearTimeout(tapFeedbackTimer);
+    tapFeedbackTimer = setTimeout(function () {
+        tapTempoButton.classList.remove('tapped');
+    }, 140);
+}
+
+function registerTempoTap() {
+    var now = performance.now();
+    var interval = now - lastTapTime;
+    showTapFeedback();
+
+    if (lastTapTime === 0 || interval > 2500) {
+        tapIntervals = [];
+        lastTapTime = now;
+        return;
+    }
+
+    lastTapTime = now;
+    if (interval <= 0) return;
+
+    tapIntervals.push(interval);
+    if (tapIntervals.length > 4) tapIntervals.shift();
+
+    var medianInterval = getMedianInterval(tapIntervals);
+    setBpm(60000 / medianInterval);
+}
+
+tapTempoButton.addEventListener('pointerdown', function (event) {
+    event.preventDefault();
+    registerTempoTap();
+});
+
+tapTempoButton.addEventListener('click', function (event) {
+    if (event.detail === 0) registerTempoTap();
+});
+
 // ========== BEAT FEEDBACK FROM C++ ==========
 window.updateMetroBeat = function (beatInBar, newTotalBeats) {
     currentBeat = beatInBar;
@@ -123,15 +189,8 @@ function updateBarModeDuration() {
     } else {
         metroDuration.textContent = 'Duration: ' + duration.toFixed(1) + 's';
     }
-    maxLengthSec = Math.max(MAX_LENGTH_MIN, Math.min(MAX_LENGTH_MAX, duration));
-    updateMaxLengthDisplay();
-    if (maxLoopLengthSliderState) {
-        var pct = (maxLengthSec - MAX_LENGTH_MIN) / (MAX_LENGTH_MAX - MAX_LENGTH_MIN);
-        if (isNaN(pct) || !isFinite(pct)) pct = 0;
-        maxLoopLengthSliderState.sliderDragStarted();
-        maxLoopLengthSliderState.setNormalisedValue(pct);
-        maxLoopLengthSliderState.sliderDragEnded();
-    }
+    // Note: the bar duration is enforced by the C++ processor (Bars-mode
+    // length lock) — no slider parameter to sync anymore.
 }
 
 // ========== TOGGLE FUNCTIONS (called from C++ via MIDI) ==========
@@ -148,12 +207,14 @@ window.togglePlayClick = function () { playClickBtn.click(); };
 clickToggle.addEventListener('click', function () {
     metronomeEnabled = !metronomeEnabled;
     clickToggle.classList.toggle('active', metronomeEnabled);
+    clickToggle.setAttribute('aria-pressed', String(metronomeEnabled));
     updateMetronomeEngine(false);
 });
 
 playClickBtn.addEventListener('click', function () {
     playClickActive = !playClickActive;
     playClickBtn.classList.toggle('active', playClickActive);
+    playClickBtn.setAttribute('aria-pressed', String(playClickActive));
 
     var iconPlay = '<svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
     var iconStop = '<svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor"><rect x="6" y="6" width="12" height="12"/></svg>';
@@ -163,12 +224,7 @@ playClickBtn.addEventListener('click', function () {
     updateMetronomeEngine(playClickActive);
 });
 
-bpmInput.addEventListener('input', function () {
-    bpm = parseInt(bpmInput.value) || 120;
-    bpm = Math.max(30, Math.min(300, bpm));
-    emitEventWithArgs('metroSetBPM', [bpm]);
-    updateBarModeDuration();
-});
+bpmInput.addEventListener('change', function () { setBpm(bpmInput.value); });
 
 barsInput.addEventListener('input', function () {
     numBars = parseInt(barsInput.value) || 4;
@@ -189,6 +245,7 @@ beatsInput.addEventListener('input', function () {
 preCountToggle.addEventListener('click', function () {
     preCountEnabled = !preCountEnabled;
     preCountToggle.classList.toggle('active', preCountEnabled);
+    preCountToggle.setAttribute('aria-pressed', String(preCountEnabled));
     preCountGroup.style.opacity = preCountEnabled ? '1' : '0.4';
     preCountGroup.style.pointerEvents = preCountEnabled ? 'auto' : 'none';
 });

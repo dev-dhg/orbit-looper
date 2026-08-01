@@ -1,5 +1,22 @@
 /*
   ==============================================================================
+   ORBIT LOOPER LOCAL PATCH — read before upgrading JUCE
+
+   Base:    JUCE 8.0.12  modules/juce_gui_extra/native/juce_WebBrowserComponent_linux.cpp
+   Applied: copied over the upstream file at configure time (Linux only — see
+            root CMakeLists.txt "Apply JUCE Linux WebView fix").
+   Changes vs upstream: WebKitGTK stability fixes for plugin hosts — relaxed
+            sandbox/compositing handling and lifecycle hardening so the
+            WebView neither renders a white surface nor deadlocks the host
+            on editor destruction (see ORBITLOOPER markers/diffs below).
+
+   On a JUCE upgrade: re-diff this file against the new upstream version and
+   re-apply the changes; do NOT keep copying this file blindly.
+  ==============================================================================
+*/
+
+/*
+  ==============================================================================
 
    This file is part of the JUCE framework.
    Copyright (c) Raw Material Software Limited

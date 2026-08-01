@@ -9,9 +9,9 @@ class OrbitLooperWebBrowser : public juce::WebBrowserComponent {
 public:
   OrbitLooperWebBrowser(
       OrbitLooperAudioProcessor &p, OrbitLooperAudioProcessorEditor *e,
-      juce::WebSliderRelay &loopLevel, juce::WebSliderRelay &maxLoopLength,
-      juce::WebSliderRelay &inputGain, juce::WebSliderRelay &outputGain,
-      juce::WebSliderRelay &inputPan, juce::WebSliderRelay &outputPan);
+      juce::WebSliderRelay &loopLevel, juce::WebSliderRelay &inputGain,
+      juce::WebSliderRelay &outputGain, juce::WebSliderRelay &inputPan,
+      juce::WebSliderRelay &outputPan);
 
   ~OrbitLooperWebBrowser() override;
 
@@ -37,9 +37,9 @@ private:
   // Factory method for WebBrowserComponent::Options to pass to base constructor
   static juce::WebBrowserComponent::Options createOptions(
       OrbitLooperAudioProcessor &p, OrbitLooperAudioProcessorEditor *e,
-      juce::WebSliderRelay &loopLevel, juce::WebSliderRelay &maxLoopLength,
-      juce::WebSliderRelay &inputGain, juce::WebSliderRelay &outputGain,
-      juce::WebSliderRelay &inputPan, juce::WebSliderRelay &outputPan,
+      juce::WebSliderRelay &loopLevel, juce::WebSliderRelay &inputGain,
+      juce::WebSliderRelay &outputGain, juce::WebSliderRelay &inputPan,
+      juce::WebSliderRelay &outputPan,
       OrbitLooperWebBrowser
           *browserInstance); // Needed to bind the member resource provider
 

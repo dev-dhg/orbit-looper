@@ -8,7 +8,7 @@ Welcome to Orbit Looper, a guitar looper with a modern interface designed for mu
 
 Orbit Looper is a multi-layer looper that runs as a standalone app (desktop and Android) or as a plugin (VST3, AU, LV2) inside your DAW.
 
-When you first launch, you'll see the main screen: a circular loop ring in the center showing your loop position, transport controls at the bottom, and a navigation bar to access settings, metronome, MIDI mapping, and help.
+When you first launch, you'll see the main screen: a circular loop ring showing your loop position, transport and utility controls, gain controls, and a tempo strip. The navigation bar opens Rhythm & Bars, MIDI mapping, audio-device settings, Orbit settings, and help.
 
 ### Audio Setup
 
@@ -36,6 +36,8 @@ That's it. You've just recorded and layered your first loop.
 
 ## Transport Controls
 
+The circular row contains the primary performance controls. Arm Overdub, Monitor, and Export use the labeled utility row directly beneath it.
+
 | Button | What it does |
 |--------|-------------|
 | **Record** | Start recording. Tap again to finish and begin overdubbing. Tap again to add more layers. |
@@ -44,7 +46,7 @@ That's it. You've just recorded and layered your first loop.
 | **Undo** | Remove the last overdub layer. Works during playback or while stopped. |
 | **Arm Overdub** | Queue the next overdub to start exactly at the loop boundary (enabled by default). |
 | **Monitor** | Toggle live input pass-through. Useful with USB audio interfaces to avoid hearing double audio. |
-| **Export** | Save your loop as a 24-bit stereo WAV file. |
+| **Export** | Save your loop as a 24-bit stereo WAV file (available while the loop is playing or stopped; the file matches the Loop Level you hear). |
 
 ---
 
@@ -56,22 +58,28 @@ Orbit Looper has three looping modes. You can switch between them from the main 
 The first layer you record sets the loop length. All overdubs automatically wrap at this boundary. This is how traditional stompbox loopers work.
 
 ### Bars Mode
-Loop length is determined by BPM and bar count, configured in the Metronome panel. Great for precise, tempo-synced loops.
+Loop length is determined by BPM, Bars, and Beats. Set BPM on the main screen and configure Bars and Beats in **Rhythm & Bars**. This mode is useful for precise, tempo-synced loops.
 
 ### Dynamic Mode
 Overdubs can extend the loop length beyond the original recording, up to the Global Max Length set in Settings. Good for experimental, free-form looping.
 
 ---
 
-## Metronome
+## Tempo And Metronome
 
-Open the Metronome panel from the navigation bar.
+The performance controls are in the tempo strip beneath Loop Level:
 
-- **Click toggle**: Turn the metronome click on or off. The click is synthesized in the audio thread and plays through your audio interface.
-- **BPM**: Set the tempo. Tap the value to adjust.
-- **Bars / Beats**: Set how many bars and beats per bar. In Bars Mode, this determines the loop length.
-- **Pre-count**: Enable a count-in before recording starts. Works with all trigger methods — button, key, MIDI, or footswitch.
-- **Rhythm pattern editor**: A step-sequencer-style matrix where you can set accent (A) and regular (B) beats, up to 16 beats per bar.
+- **BPM**: Enter an exact tempo from 30 to 300 BPM.
+- **TAP**: Tap repeatedly to detect the tempo. A new sequence starts after 2.5 seconds without a tap. TAP changes BPM only; it does not enable Click or start the metronome.
+- **Click**: Turn the metronome click on or off. The click is synthesized in the audio thread and plays through your audio interface.
+- **Pre-count**: Enable a count-in before recording starts. It works with button, key, MIDI, and footswitch triggers.
+
+Open **Rhythm & Bars** from the navigation bar for the advanced controls:
+
+- **Bars / Beats**: Set the number of bars and beats per bar. Together with BPM, these determine the loop length in Bars Mode.
+- **Pre-count Bars**: Choose the length of the count-in.
+- **Audition Click**: Hear the click at the current BPM without recording.
+- **Rhythm pattern editor**: Set accent (A) and regular (B) beats, up to 16 beats per bar.
 
 ---
 
@@ -128,7 +136,7 @@ For devices that use the Serial Port Profile (SPP), open **Settings** and scroll
 
 Open Settings from the navigation bar.
 
-- **Global Max Length**: How much RAM to allocate for loop layers. Longer durations use more memory (e.g., 5 minutes ≈ 0.9 GB, 10 minutes ≈ 1.8 GB).
+- **Global Max Length**: The maximum loop length ("tape length") and Classic-mode recording limit. Memory is allocated per layer as you actually record — a longer setting only increases RAM for the base layer (~23 MB per minute at 48 kHz stereo); each overdub layer adds memory proportional to your actual loop length.
 - **Max Layers**: Number of independent overdub layers (2–8). More layers use more memory.
 - **Mute Input**: Mute audio input pass-through to prevent feedback from speakers. Recording still works while muted.
 - **Mute Input on Startup**: Enabled by default on Android to prevent feedback from internal speakers. You can disable it in Settings.
@@ -138,7 +146,7 @@ Open Settings from the navigation bar.
 
 ## Tips & Tricks
 
-- **Double-click** any parameter value (Gain, Max Length) to reset it to its default.
+- **Double-click** any parameter value (Gain, Loop Level) to reset it to its default.
 - **Shift+Click** or **Alt+Click** any parameter value to type a precise number.
 - The **green dot** in the Mapping panel shows live MIDI activity — useful for confirming your controller is connected.
 - The **Monitor** button is especially useful with USB audio interfaces to prevent hearing the direct signal and the looped signal at the same time.

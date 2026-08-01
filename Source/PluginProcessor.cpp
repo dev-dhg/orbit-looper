@@ -16,29 +16,25 @@ OrbitLooperAudioProcessor::OrbitLooperAudioProcessor()
   // Initialize all MIDI CC mappings to unassigned
   for (auto &cc : midiCCMap)
     cc.store(CC_UNASSIGNED);
+
+  // Loop-mode changes alter the spare-layer capacity target (Dynamic needs
+  // the full Global Max) — re-run the message-thread allocator.
+  apvts.addParameterListener("loop_mode", this);
 }
 
-OrbitLooperAudioProcessor::~OrbitLooperAudioProcessor() {}
+OrbitLooperAudioProcessor::~OrbitLooperAudioProcessor() {
+  apvts.removeParameterListener("loop_mode", this);
+  cancelPendingUpdate();
+}
 
 //==============================================================================
 juce::AudioProcessorValueTreeState::ParameterLayout
 OrbitLooperAudioProcessor::createParameterLayout() {
   juce::AudioProcessorValueTreeState::ParameterLayout layout;
 
-  // Max Loop Length - how many seconds the buffer can hold (0-1800)
-  layout.add(std::make_unique<juce::AudioParameterFloat>(
-      juce::ParameterID{"max_loop_length", 1}, "Max Loop Length",
-      juce::NormalisableRange<float>(0.0f, 1800.0f, 0.001f),
-      60.0f, // default: 1 minute
-      juce::AudioParameterFloatAttributes().withStringFromValueFunction(
-          [](float value, int) {
-            if (value >= 60.0f) {
-              int m = static_cast<int>(value) / 60;
-              float s = std::fmod(value, 60.0f);
-              return juce::String(m) + "m " + juce::String(s, 3) + "s";
-            }
-            return juce::String(value, 3) + "s";
-          })));
+  // NOTE: the former "max_loop_length" parameter was removed — it had no
+  // rendered UI control. The Global Max Length (Settings modal →
+  // maxLoopSeconds) is the single loop-length authority.
 
   // Loop Level - controls how much of the previous loop is kept during overdub
   // 100% = full overdub (additive), lower = loop decays over time
@@ -103,6 +99,18 @@ OrbitLooperAudioProcessor::createParameterLayout() {
 }
 
 //==============================================================================
+const std::array<const char *, OrbitLooperAudioProcessor::NUM_MIDI_ACTIONS> &
+OrbitLooperAudioProcessor::getMidiActionNames() {
+  static const std::array<const char *, NUM_MIDI_ACTIONS> names{
+      "Record",        "Stop",        "Clear",       "Undo",
+      "Footswitch",    "Overdub",     "BarMode",     "Click",
+      "PreCount",      "ArmOverdub",  "PlayClick",   "Play",
+      "Monitor",       "LoopModeCycle", "ClassicMode", "BeatsMode",
+      "DynamicMode",   "PanInputLeft", "PanInputCenter", "PanInputRight"};
+  return names;
+}
+
+//==============================================================================
 const juce::String OrbitLooperAudioProcessor::getName() const {
   return JucePlugin_Name;
 }
@@ -121,28 +129,58 @@ void OrbitLooperAudioProcessor::changeProgramName(int, const juce::String &) {}
 //==============================================================================
 void OrbitLooperAudioProcessor::prepareToPlay(double sampleRate,
                                               int /*samplesPerBlock*/) {
+  const bool sameRate = std::abs(sampleRate - currentSampleRate) < 0.5;
   currentSampleRate = sampleRate;
-  const float limitSec = std::min(maxLoopSeconds.load(), SAFETY_LIMIT_SECONDS);
-  maxLoopSamples = static_cast<int>(sampleRate * limitSec);
+  const int tapeSamples = globalMaxSamples();
 
-  // Allocate all layer buffers
-  for (auto &layer : layers) {
-    layer.bufferL.resize(static_cast<size_t>(maxLoopSamples), 0.0f);
-    layer.bufferR.resize(static_cast<size_t>(maxLoopSamples), 0.0f);
-    layer.length = 0;
+  // Preserve the recorded loop across host re-prepares (DAW play/stop):
+  // only when the sample rate and tape size are unchanged and the loop is
+  // finalized. Mid-recording/overdubbing re-prepares still do a full reset.
+  const bool loopFinalized = (currentState == LooperState::PLAYING ||
+                              currentState == LooperState::STOPPED) &&
+                             masterLoopLength > 0 && numLayers > 0;
+
+  if (sameRate && loopFinalized &&
+      layers[0].capacity.load() == tapeSamples) {
+    readPosition = readPosition % masterLoopLength;
+    activeLayerIdx = -1;
+    footswitchAutoOverdub = false;
+    overdubArmed = false;
+    overdubArmedForUI.store(false);
+  } else {
+    // Lazy layer storage (D1): allocate ONLY the base layer at the Global Max
+    // ("tape length"). Overdub layers are allocated on demand by the
+    // message-thread allocator (handleAsyncUpdate), sized to the actual loop.
+    layers[0].capacity.store(0);
+    layers[0].bufferL.assign(static_cast<size_t>(tapeSamples), 0.0f);
+    layers[0].bufferR.assign(static_cast<size_t>(tapeSamples), 0.0f);
+    layers[0].length = 0;
+    layers[0].needsCleanup.store(false);
+    layers[0].capacity.store(tapeSamples);
+
+    for (size_t i = 1; i < layers.size(); ++i) {
+      auto &layer = layers[i];
+      layer.capacity.store(0);
+      std::vector<float>().swap(layer.bufferL);
+      std::vector<float>().swap(layer.bufferR);
+      layer.length = 0;
+      layer.needsCleanup.store(false);
+    }
+
+    // Reset state
+    numLayers = 0;
+    layersInUseAtomic.store(0);
+    masterLoopLength = 0;
+    activeLayerIdx = -1;
+    footswitchAutoOverdub = false;
+    writePosition = 0;
+    readPosition = 0;
+    currentState = LooperState::EMPTY;
+    looperState.store(static_cast<int>(LooperState::EMPTY));
+    hasUndoLayer.store(false);
   }
 
-  // Reset state
-  numLayers = 0;
-  masterLoopLength = 0;
-  activeLayerIdx = -1;
-  footswitchAutoOverdub = false;
-  writePosition = 0;
-  readPosition = 0;
-  currentState = LooperState::EMPTY;
-  looperState.store(static_cast<int>(LooperState::EMPTY));
-  hasUndoLayer.store(false);
-
+  // Common resets (both preserve and full-reset paths):
   // Clear any pending commands (fixes multi-hit bug on standalone startup)
   pendingRecord.store(false);
   pendingStop.store(false);
@@ -183,12 +221,114 @@ void OrbitLooperAudioProcessor::prepareToPlay(double sampleRate,
 void OrbitLooperAudioProcessor::releaseResources() {
   // Free all layer buffers
   for (auto &layer : layers) {
-    layer.bufferL.clear();
-    layer.bufferR.clear();
+    layer.capacity.store(0);
+    std::vector<float>().swap(layer.bufferL);
+    std::vector<float>().swap(layer.bufferR);
     layer.length = 0;
+    layer.needsCleanup.store(false);
   }
   numLayers = 0;
+  layersInUseAtomic.store(0);
   masterLoopLength = 0;
+}
+
+//==============================================================================
+// Lazy layer storage — message-thread allocator (see PluginProcessor.h)
+//==============================================================================
+
+int OrbitLooperAudioProcessor::globalMaxSamples() const {
+  const float limitSec = std::min(maxLoopSeconds.load(), SAFETY_LIMIT_SECONDS);
+  return static_cast<int>(currentSampleRate * limitSec);
+}
+
+// Capacity target for the next overdub spare layer.
+int OrbitLooperAudioProcessor::requiredLayerCapacitySamples() const {
+  const int cap = globalMaxSamples();
+
+  // Dynamic mode: overdubs may extend up to the Global Max.
+  if (loopMode.load() == static_cast<int>(LoopMode::Dynamic))
+    return cap;
+
+  // Classic/Bars: overdubs are locked to the master loop length.
+  // loopLengthSeconds is the audio thread's published master length; add a
+  // small headroom for float rounding.
+  const float masterSec = loopLengthSeconds.load();
+  if (masterSec <= 0.0f)
+    return cap; // No loop yet — size for the worst case
+
+  const int needed =
+      static_cast<int>(masterSec * currentSampleRate) + 256;
+  return std::min(needed, cap);
+}
+
+// Resize/zero one layer's storage off the audio thread. Uses a
+// publish/re-validate handshake with startOverdubLayer's claim:
+// capacity=0 blocks new claims; if the layer got claimed first, back off.
+void OrbitLooperAudioProcessor::ensureLayerStorage(int layerIdx,
+                                                   int targetSamples) {
+  auto &layer = layers[static_cast<size_t>(layerIdx)];
+  const int oldCapacity = layer.capacity.load();
+  const bool dirty = layer.needsCleanup.load();
+
+  if (oldCapacity == targetSamples && !dirty)
+    return;
+
+  layer.capacity.store(0); // Block claims while we touch the storage
+
+  if (layersInUseAtomic.load() > layerIdx) {
+    // The audio thread claimed this layer in the meantime — hands off.
+    layer.capacity.store(oldCapacity);
+    return;
+  }
+
+  if (targetSamples <= 0) {
+    std::vector<float>().swap(layer.bufferL);
+    std::vector<float>().swap(layer.bufferR);
+  } else {
+    layer.bufferL.assign(static_cast<size_t>(targetSamples), 0.0f);
+    layer.bufferR.assign(static_cast<size_t>(targetSamples), 0.0f);
+    if (targetSamples < oldCapacity) {
+      layer.bufferL.shrink_to_fit();
+      layer.bufferR.shrink_to_fit();
+    }
+  }
+
+  layer.length = 0; // Safe: not claimed
+  layer.needsCleanup.store(false);
+  layer.capacity.store(targetSamples);
+}
+
+void OrbitLooperAudioProcessor::handleAsyncUpdate() {
+  const int state = looperState.load();
+  const int inUse =
+      std::max(layersInUseAtomic.load(),
+               state == static_cast<int>(LooperState::RECORDING) ? 1 : 0);
+
+  const int tapeSamples = globalMaxSamples();
+
+  // Retired layers: zero the immediate spare slot for reuse, free the rest.
+  for (int i = std::max(inUse, 1); i < MAX_LAYERS; ++i) {
+    auto &layer = layers[static_cast<size_t>(i)];
+    if (layer.needsCleanup.load())
+      ensureLayerStorage(i, i == inUse ? requiredLayerCapacitySamples() : 0);
+  }
+
+  if (state == static_cast<int>(LooperState::EMPTY) && inUse == 0) {
+    // Base layer at full tape length, ready for instant record
+    ensureLayerStorage(0, tapeSamples);
+    // Free leftover overdub storage from a previous loop
+    for (int i = 1; i < MAX_LAYERS; ++i)
+      ensureLayerStorage(i, 0);
+  } else if (inUse >= 1 && inUse < maxLayerCount.load()) {
+    // Keep exactly one spare overdub slot allocated ahead of use
+    ensureLayerStorage(inUse, requiredLayerCapacitySamples());
+  }
+}
+
+void OrbitLooperAudioProcessor::parameterChanged(const juce::String &id,
+                                                 float /*newValue*/) {
+  if (id == "loop_mode")
+    triggerAsyncUpdate();
 }
 
 bool OrbitLooperAudioProcessor::isBusesLayoutSupported(
@@ -243,6 +383,7 @@ void OrbitLooperAudioProcessor::triggerMonitorToggle() {
 
 void OrbitLooperAudioProcessor::setMaxLoopLength(float seconds) {
   maxLoopSeconds.store(std::clamp(seconds, 1.0f, SAFETY_LIMIT_SECONDS));
+  triggerAsyncUpdate(); // Re-size storage on the message thread
 }
 
 float OrbitLooperAudioProcessor::getMaxLoopLength() const {
@@ -421,6 +562,7 @@ void OrbitLooperAudioProcessor::setMidiCC(MidiAction action, int ccNumber) {
           midiCCMap[static_cast<size_t>(i)].store(CC_UNASSIGNED);
     }
     midiCCMap[static_cast<size_t>(idx)].store(ccNumber);
+    midiStateChanged.store(true);
   }
 }
 
@@ -465,6 +607,7 @@ void OrbitLooperAudioProcessor::startMidiLearn(MidiAction action) {
   midiLearnActive.store(true);
   lastLearnedCC.store(CC_UNASSIGNED);
   lastLearnedAction.store(CC_UNASSIGNED);
+  midiStateChanged.store(true);
   juce::Logger::writeToLog("OrbitLooper: MIDI learn started for action " +
       juce::String(static_cast<int>(action)));
 }
@@ -474,6 +617,7 @@ void OrbitLooperAudioProcessor::cancelMidiLearn() {
       juce::String(midiLearnActive.load() ? "Y" : "N") + ")");
   midiLearnActive.store(false);
   midiLearnTarget.store(CC_UNASSIGNED);
+  midiStateChanged.store(true);
 }
 
 bool OrbitLooperAudioProcessor::isMidiLearning() const {
@@ -530,6 +674,7 @@ void OrbitLooperAudioProcessor::processMidiMessages(
       }
       midiLearnActive.store(false);
       midiLearnTarget.store(CC_UNASSIGNED);
+      midiStateChanged.store(true);
       continue; // Don't trigger actions while learning
     }
 
@@ -641,6 +786,293 @@ void OrbitLooperAudioProcessor::processMidiMessages(
   }
 }
 
+void OrbitLooperAudioProcessor::resetLooperToEmpty() {
+  // Base layer needs no zeroing: recording clear-ahead + exact-length
+  // finalize guarantee stale samples are never read. Overdub slots are
+  // retired here (capacity 0 blocks reuse) and zeroed/freed by the
+  // message-thread allocator before they can be claimed again.
+  layers[0].length = 0;
+  for (size_t i = 1; i < layers.size(); ++i) {
+    auto &layer = layers[i];
+    layer.length = 0;
+    if (layer.capacity.load() > 0) {
+      layer.capacity.store(0);
+      layer.needsCleanup.store(true);
+    }
+  }
+  numLayers = 0;
+  layersInUseAtomic.store(0);
+  masterLoopLength = 0;
+  activeLayerIdx = -1;
+  footswitchAutoOverdub = false;
+  overdubArmed = false;
+  overdubArmedForUI.store(false);
+  writePosition = 0;
+  readPosition = 0;
+  currentState = LooperState::EMPTY;
+  looperState.store(static_cast<int>(LooperState::EMPTY));
+  loopLengthSeconds.store(0.0f);
+  recordBasisSeconds.store(0.0f);
+  hasUndoLayer.store(false);
+  triggerAsyncUpdate();
+}
+
+// Finalize the base recording (layer 0) at the given length and make the
+// loop playable.
+void OrbitLooperAudioProcessor::finishBaseLayer(int lengthSamples) {
+  layers[0].length = lengthSamples;
+  numLayers = 1;
+  layersInUseAtomic.store(1);
+  masterLoopLength = lengthSamples;
+  loopLengthSeconds.store(static_cast<float>(masterLoopLength) /
+                          static_cast<float>(currentSampleRate));
+  readPosition = 0;
+  activeLayerIdx = -1;
+  hasUndoLayer.store(false);
+  triggerAsyncUpdate(); // Size the first overdub spare to the new master
+}
+
+// Finalize the layer currently being overdubbed and recalculate the master
+// loop. In Dynamic mode an overdub may have extended past the master loop;
+// in Classic/Bars the layer length is locked to the master loop.
+void OrbitLooperAudioProcessor::finalizeOverdubLayer() {
+  if (activeLayerIdx >= 0 && activeLayerIdx < MAX_LAYERS) {
+    auto &layer = layers[static_cast<size_t>(activeLayerIdx)];
+
+    if (loopMode.load() == static_cast<int>(LoopMode::Dynamic)) {
+      layer.length =
+          (readPosition > masterLoopLength) ? readPosition : masterLoopLength;
+
+      masterLoopLength = 0;
+      for (int i = 0; i < numLayers; ++i)
+        masterLoopLength =
+            std::max(masterLoopLength, layers[static_cast<size_t>(i)].length);
+
+      loopLengthSeconds.store(static_cast<float>(masterLoopLength) /
+                              static_cast<float>(currentSampleRate));
+    } else {
+      layer.length = masterLoopLength;
+    }
+
+    if (masterLoopLength > 0)
+      readPosition = readPosition % masterLoopLength;
+  }
+  activeLayerIdx = -1;
+  footswitchAutoOverdub = false;
+  hasUndoLayer.store(numLayers > 1);
+}
+
+// Begin a new overdub layer writing from fromPosition. Returns false when
+// the layer cap is reached, no loop exists, or the spare layer's storage is
+// not ready yet (caller state is unchanged).
+bool OrbitLooperAudioProcessor::startOverdubLayer(int fromPosition,
+                                                  bool viaFootswitch) {
+  if (numLayers >= maxLayerCount.load() || masterLoopLength <= 0)
+    return false;
+
+  auto &newLayer = layers[static_cast<size_t>(numLayers)];
+
+  // Claim gate: the spare must have message-thread-allocated storage that
+  // covers the master loop, and must not be awaiting cleanup.
+  if (newLayer.capacity.load() < masterLoopLength ||
+      newLayer.needsCleanup.load())
+    return false;
+
+  // Publish the claim, then re-validate: the allocator retires a layer by
+  // zeroing its capacity BEFORE touching storage, and backs off when it
+  // sees our claim — one side always yields (see ensureLayerStorage).
+  activeLayerIdx = numLayers;
+  numLayers++;
+  layersInUseAtomic.store(numLayers);
+  const int layerCap = newLayer.capacity.load();
+  if (layerCap < masterLoopLength) {
+    numLayers--;
+    layersInUseAtomic.store(numLayers);
+    activeLayerIdx = -1;
+    return false;
+  }
+
+  // Clear the layer prefix up to the start point (at least a 1024-sample
+  // head start) so playback modulo-reads never hit stale data.
+  const int prefixSamples = std::min(std::max(fromPosition, 1024), layerCap);
+  if (prefixSamples > 0) {
+    juce::FloatVectorOperations::clear(newLayer.bufferL.data(), prefixSamples);
+    juce::FloatVectorOperations::clear(newLayer.bufferR.data(), prefixSamples);
+  }
+
+  newLayer.length = 0;
+  // Footswitch-initiated overdubs (with prior overdubs present) get the
+  // 2-layer undo treatment — see pendingUndo.
+  footswitchAutoOverdub = viaFootswitch && (numLayers > 2);
+  hasUndoLayer.store(true);
+  readPosition = fromPosition;
+  writePosition = fromPosition;
+  currentState = LooperState::OVERDUBBING;
+  triggerAsyncUpdate(); // Allocate the next spare ahead of use
+  return true;
+}
+
+// Render samples [fromSample, numSamples) in OVERDUBBING state. Used by the
+// OVERDUBBING case (from 0) and by the arm-boundary engagement in PLAYING
+// (mid-block continuation, so no dry input leaks through unprocessed).
+void OrbitLooperAudioProcessor::renderOverdubSegment(
+    const float *inL, const float *inR, float *outL, float *outR,
+    int fromSample, int numSamples, bool isInputMuted, float inPanL,
+    float inPanR, float loopLevel, float &peakOut) {
+  if (fromSample >= numSamples)
+    return;
+
+  if (masterLoopLength <= 0 || activeLayerIdx < 0 ||
+      activeLayerIdx >= MAX_LAYERS) {
+    for (int i = fromSample; i < numSamples; ++i) {
+      outL[i] = isInputMuted ? 0.0f : inL[i];
+      outR[i] = isInputMuted ? 0.0f : inR[i];
+    }
+    return;
+  }
+
+  auto &activeLayer = layers[static_cast<size_t>(activeLayerIdx)];
+  const int activeCap = activeLayer.capacity.load();
+  const int segmentSamples = numSamples - fromSample;
+
+  // Clear ahead to avoid stale data
+  const bool nonDynamicMode =
+      (loopMode.load() != static_cast<int>(LoopMode::Dynamic));
+  int clearStartIdx =
+      nonDynamicMode ? (readPosition % masterLoopLength) : readPosition;
+  int clearEndIdx = std::min(clearStartIdx + segmentSamples + 1024, activeCap);
+  if (clearStartIdx < clearEndIdx) {
+    juce::FloatVectorOperations::clear(activeLayer.bufferL.data() +
+                                           clearStartIdx,
+                                       clearEndIdx - clearStartIdx);
+    juce::FloatVectorOperations::clear(activeLayer.bufferR.data() +
+                                           clearStartIdx,
+                                       clearEndIdx - clearStartIdx);
+  }
+
+  // Overdub: write input to new layer while summing all existing layers.
+  // Classic/Bars: auto-stop when readPosition reaches masterLoopLength.
+  // Dynamic: readPosition advances linearly (can extend past the master).
+  // Existing layers read at (writePos % layerLength) — shorter layers tile.
+  // Positions are tracked incrementally; writePos never wraps within a pass
+  // (non-dynamic auto-stops at the boundary), so the counters stay in sync
+  // without per-sample modulo.
+  int layerPos[MAX_LAYERS];
+  {
+    const int startPos =
+        nonDynamicMode ? (readPosition % masterLoopLength) : readPosition;
+    for (int l = 0; l < numLayers; ++l) {
+      const int len = layers[static_cast<size_t>(l)].length;
+      layerPos[l] = len > 0 ? startPos % len : 0;
+    }
+  }
+
+  for (int i = fromSample; i < numSamples; ++i) {
+    // In non-dynamic modes, use modulo for buffer write position but track
+    // linear readPosition
+    int writePos =
+        nonDynamicMode ? (readPosition % masterLoopLength) : readPosition;
+
+    // Sum all complete layers (not the active one being recorded)
+    float sumL = 0.0f, sumR = 0.0f;
+    for (int l = 0; l < numLayers; ++l) {
+      const auto &layer = layers[static_cast<size_t>(l)];
+      if (l != activeLayerIdx && layer.length > 0) {
+        sumL += layer.bufferL[static_cast<size_t>(layerPos[l])];
+        sumR += layer.bufferR[static_cast<size_t>(layerPos[l])];
+      }
+      if (layer.length > 0 && ++layerPos[l] >= layer.length)
+        layerPos[l] = 0;
+    }
+
+    // Write input to active layer at current position
+    float inMono = (inL[i] + inR[i]) * 0.5f;
+    if (writePos < activeCap) {
+      activeLayer.bufferL[static_cast<size_t>(writePos)] = inMono * inPanL;
+      activeLayer.bufferR[static_cast<size_t>(writePos)] = inMono * inPanR;
+    }
+
+    // Output: dry input + sum of existing layers at loop level
+    outL[i] = (isInputMuted ? 0.0f : inMono * inPanL) + sumL * loopLevel;
+    outR[i] = (isInputMuted ? 0.0f : inMono * inPanR) + sumR * loopLevel;
+    peakOut =
+        std::max(peakOut, std::max(std::abs(outL[i]), std::abs(outR[i])));
+
+    readPosition++;
+
+    // Non-dynamic modes: auto-stop overdub at loop boundary (OVERDUB → PLAY)
+    // Dynamic mode: auto-stop when this layer's storage is exhausted
+    if ((nonDynamicMode && readPosition >= masterLoopLength) ||
+        (!nonDynamicMode && readPosition >= activeCap)) {
+      finalizeOverdubLayer();
+      currentState = LooperState::PLAYING;
+      looperState.store(static_cast<int>(LooperState::PLAYING));
+
+      // Process remaining samples as PLAYING
+      renderPlaybackTail(inL, inR, outL, outR, i + 1, numSamples, isInputMuted,
+                         inPanL, inPanR, loopLevel, peakOut);
+      break;
+    }
+  }
+
+  // Keep write position in sync for state transitions
+  if (currentState == LooperState::OVERDUBBING)
+    writePosition = readPosition;
+}
+
+// Shared PLAYING-state record/overdub press behavior: disarm if armed, arm
+// if arming is enabled, otherwise start an immediate overdub.
+void OrbitLooperAudioProcessor::toggleArmOrStartOverdub(bool viaFootswitch) {
+  if (overdubArmed) {
+    // Already armed — toggle OFF (disarm)
+    overdubArmed = false;
+    overdubArmedForUI.store(false);
+  } else if (overdubArmEnabled.load() && numLayers < maxLayerCount.load() &&
+             masterLoopLength > 0) {
+    // Arm: queue overdub for next loop boundary
+    overdubArmed = true;
+    overdubArmedForUI.store(true);
+  } else {
+    startOverdubLayer(readPosition, viaFootswitch);
+  }
+}
+
+// Render samples [fromSample, numSamples) as PLAYING after an in-block
+// state transition (overdub auto-stop). Advances readPosition.
+void OrbitLooperAudioProcessor::renderPlaybackTail(
+    const float *inL, const float *inR, float *outL, float *outR,
+    int fromSample, int numSamples, bool isInputMuted, float inPanL,
+    float inPanR, float loopLevel, float &peakOut) {
+  // Per-layer positions tracked incrementally (no per-sample modulo)
+  int layerPos[MAX_LAYERS];
+  for (int l = 0; l < numLayers; ++l) {
+    const int len = layers[static_cast<size_t>(l)].length;
+    layerPos[l] = len > 0 ? readPosition % len : 0;
+  }
+
+  for (int j = fromSample; j < numSamples; ++j) {
+    float pSumL = 0.0f, pSumR = 0.0f;
+    for (int l = 0; l < numLayers; ++l) {
+      const auto &layer = layers[static_cast<size_t>(l)];
+      if (layer.length > 0) {
+        pSumL += layer.bufferL[static_cast<size_t>(layerPos[l])];
+        pSumR += layer.bufferR[static_cast<size_t>(layerPos[l])];
+        if (++layerPos[l] >= layer.length)
+          layerPos[l] = 0;
+      }
+    }
+    float inMonoJ = (inL[j] + inR[j]) * 0.5f;
+    outL[j] = (isInputMuted ? 0.0f : inMonoJ * inPanL) + pSumL * loopLevel;
+    outR[j] = (isInputMuted ? 0.0f : inMonoJ * inPanR) + pSumR * loopLevel;
+    peakOut =
+        std::max(peakOut, std::max(std::abs(outL[j]), std::abs(outR[j])));
+    readPosition = (readPosition + 1) % masterLoopLength;
+    if (readPosition == 0) // Master wrapped — resync tiling positions
+      for (int l = 0; l < numLayers; ++l)
+        layerPos[l] = 0;
+  }
+}
+
 void OrbitLooperAudioProcessor::processStateChanges() {
   // Sync Loop Mode parameter (set via UI)
   auto *loopModeParam = dynamic_cast<juce::AudioParameterChoice *>(
@@ -650,8 +1082,7 @@ void OrbitLooperAudioProcessor::processStateChanges() {
   }
 
   // Handle Loop Mode Cycle (from MIDI trigger)
-  if (pendingLoopModeCycle.exchange(false) ||
-      pendingClassicModeToggle.exchange(false)) {
+  if (pendingLoopModeCycle.exchange(false)) {
     if (loopModeParam) {
       int nextMode = (loopModeParam->getIndex() + 1) % 3;
       loopModeParam->setValueNotifyingHost(
@@ -699,23 +1130,7 @@ void OrbitLooperAudioProcessor::processStateChanges() {
 
   // Handle clear first (highest priority)
   if (pendingClear.exchange(false)) {
-    for (auto &layer : layers) {
-      std::fill(layer.bufferL.begin(), layer.bufferL.end(), 0.0f);
-      std::fill(layer.bufferR.begin(), layer.bufferR.end(), 0.0f);
-      layer.length = 0;
-    }
-    numLayers = 0;
-    masterLoopLength = 0;
-    activeLayerIdx = -1;
-    footswitchAutoOverdub = false;
-    overdubArmed = false;
-    overdubArmedForUI.store(false);
-    writePosition = 0;
-    readPosition = 0;
-    currentState = LooperState::EMPTY;
-    looperState.store(static_cast<int>(LooperState::EMPTY));
-    loopLengthSeconds.store(0.0f);
-    hasUndoLayer.store(false);
+    resetLooperToEmpty();
     clearTriggered.store(true); // Flash red ring
     return;
   }
@@ -734,10 +1149,14 @@ void OrbitLooperAudioProcessor::processStateChanges() {
       for (int r = 0; r < layersToRemove && numLayers > 1; ++r) {
         numLayers--;
         auto &removed = layers[static_cast<size_t>(numLayers)];
-        std::fill(removed.bufferL.begin(), removed.bufferL.end(), 0.0f);
-        std::fill(removed.bufferR.begin(), removed.bufferR.end(), 0.0f);
+        // Retire the slot: capacity 0 blocks reuse until the message-thread
+        // allocator has zeroed it (no giant memset on the audio thread).
         removed.length = 0;
+        removed.capacity.store(0);
+        removed.needsCleanup.store(true);
       }
+      layersInUseAtomic.store(numLayers);
+      triggerAsyncUpdate();
 
       // Recalculate master loop length
       masterLoopLength = 0;
@@ -768,49 +1187,16 @@ void OrbitLooperAudioProcessor::processStateChanges() {
   // Handle stop (also acts as Play/Stop toggle)
   if (pendingStop.exchange(false)) {
     if (currentState == LooperState::RECORDING) {
-      // Finish recording base layer, go to stopped
-      layers[0].length = writePosition;
-      numLayers = 1;
-      masterLoopLength = writePosition;
-      float recordedSec = static_cast<float>(masterLoopLength) /
-                          static_cast<float>(currentSampleRate);
-      loopLengthSeconds.store(recordedSec);
-
-      // Auto Length: Automatically set the new loop value on the max length
-      // slider
-      if (isAutoLength.load()) {
-        auto *param = apvts.getParameter("max_loop_length");
-        if (param) {
-          float normalized =
-              param->getNormalisableRange().convertTo0to1(recordedSec);
-          param->setValueNotifyingHost(normalized);
-        }
+      if (writePosition == 0) {
+        // Nothing recorded yet — avoid a zombie 0-length loop
+        resetLooperToEmpty();
+        return;
       }
-
-      readPosition = 0;
-      activeLayerIdx = -1;
+      // Finish recording base layer, go to stopped
+      finishBaseLayer(writePosition);
       currentState = LooperState::STOPPED;
     } else if (currentState == LooperState::OVERDUBBING) {
-      // Finalize current overdub layer
-      if (activeLayerIdx >= 0 && activeLayerIdx < MAX_LAYERS) {
-        auto &layer = layers[static_cast<size_t>(activeLayerIdx)];
-        // If extended past master loop, use readPosition as length
-        // Otherwise pad to masterLoopLength so modulo works correctly
-        layer.length =
-            (readPosition > masterLoopLength) ? readPosition : masterLoopLength;
-
-        // Recalculate master loop length
-        masterLoopLength = 0;
-        for (int i = 0; i < numLayers; ++i)
-          masterLoopLength =
-              std::max(masterLoopLength, layers[static_cast<size_t>(i)].length);
-
-        loopLengthSeconds.store(static_cast<float>(masterLoopLength) /
-                                static_cast<float>(currentSampleRate));
-        readPosition = readPosition % masterLoopLength;
-      }
-      activeLayerIdx = -1;
-      footswitchAutoOverdub = false;
+      finalizeOverdubLayer();
       currentState = LooperState::STOPPED;
     } else if (currentState == LooperState::PLAYING) {
       currentState = LooperState::STOPPED;
@@ -843,47 +1229,18 @@ void OrbitLooperAudioProcessor::processStateChanges() {
       currentState = LooperState::PLAYING;
       looperState.store(static_cast<int>(currentState));
     } else if (currentState == LooperState::RECORDING) {
-      // Finish recording and play
-      layers[0].length = writePosition;
-      numLayers = 1;
-      masterLoopLength = writePosition;
-      float recordedSec = static_cast<float>(masterLoopLength) /
-                          static_cast<float>(currentSampleRate);
-      loopLengthSeconds.store(recordedSec);
-
-      // Auto Length: Automatically set the new loop value on the max length
-      // slider
-      if (isAutoLength.load()) {
-        auto *param = apvts.getParameter("max_loop_length");
-        if (param) {
-          float normalized =
-              param->getNormalisableRange().convertTo0to1(recordedSec);
-          param->setValueNotifyingHost(normalized);
-        }
+      if (writePosition == 0) {
+        // Nothing recorded yet — avoid a zombie 0-length loop
+        resetLooperToEmpty();
+        return;
       }
-
-      readPosition = 0;
-      activeLayerIdx = -1;
-      hasUndoLayer.store(false);
+      // Finish recording and play
+      finishBaseLayer(writePosition);
       currentState = LooperState::PLAYING;
       looperState.store(static_cast<int>(currentState));
     } else if (currentState == LooperState::OVERDUBBING) {
       // Finish overdub and play
-      if (activeLayerIdx >= 0 && activeLayerIdx < MAX_LAYERS) {
-        auto &layer = layers[static_cast<size_t>(activeLayerIdx)];
-        layer.length =
-            (readPosition > masterLoopLength) ? readPosition : masterLoopLength;
-        masterLoopLength = 0;
-        for (int i = 0; i < numLayers; ++i)
-          masterLoopLength =
-              std::max(masterLoopLength, layers[static_cast<size_t>(i)].length);
-        loopLengthSeconds.store(static_cast<float>(masterLoopLength) /
-                                static_cast<float>(currentSampleRate));
-        readPosition = readPosition % masterLoopLength;
-      }
-      activeLayerIdx = -1;
-      footswitchAutoOverdub = false;
-      hasUndoLayer.store(numLayers > 1);
+      finalizeOverdubLayer();
       currentState = LooperState::PLAYING;
       looperState.store(static_cast<int>(currentState));
     }
@@ -892,10 +1249,17 @@ void OrbitLooperAudioProcessor::processStateChanges() {
 
 void OrbitLooperAudioProcessor::handleRecordTrigger() {
   switch (currentState) {
-  case LooperState::EMPTY:
-    // Start recording the first loop layer
+  case LooperState::EMPTY: {
+    // Start recording the first loop layer. The base layer holds the full
+    // "tape" (Global Max); if its storage is mid-resize (capacity 0), the
+    // trigger is dropped — press again once the allocator has finished.
+    const int cap0 = layers[0].capacity.load();
+    if (cap0 <= 0)
+      break;
+
     activeLayerIdx = 0;
     writePosition = 0;
+    layersInUseAtomic.store(1);
     currentState = LooperState::RECORDING;
 
     // Fixed Length Modes: Instantly lock duration upon starting recording
@@ -903,127 +1267,49 @@ void OrbitLooperAudioProcessor::handleRecordTrigger() {
       float bpmVal = metroBPMSetting.load();
       int bpb = metroBeatsPerBarSetting.load();
       int bars = metroNumBarsSetting.load();
-      masterLoopLength =
-          static_cast<int>((60.0f / bpmVal) * bpb * bars * currentSampleRate);
+      masterLoopLength = std::min(
+          static_cast<int>((60.0f / bpmVal) * bpb * bars * currentSampleRate),
+          cap0);
     } else if (loopMode.load() == static_cast<int>(LoopMode::Classic)) {
-      // Classic Mode follows the current "Max Length" slider as a fixed
-      // duration
-      masterLoopLength = maxLoopSamples;
+      // Classic Mode: the Global Max Length IS the tape length
+      masterLoopLength = cap0;
     } else {
       masterLoopLength = 0; // Dynamic Mode: length determined by stop trigger
     }
+
+    // Publish the ring/time scale basis for the UI
+    recordBasisSeconds.store(
+        static_cast<float>(masterLoopLength > 0 ? masterLoopLength : cap0) /
+        static_cast<float>(currentSampleRate));
     break;
+  }
 
   case LooperState::RECORDING: {
-    // Finish recording base layer, start playback
-    layers[0].length = writePosition;
-    numLayers = 1;
-    masterLoopLength = writePosition;
-    float recordedSec = static_cast<float>(masterLoopLength) /
-                        static_cast<float>(currentSampleRate);
-    loopLengthSeconds.store(recordedSec);
-
-    // Auto Length: Automatically set the new loop value on the max length
-    // slider
-    if (isAutoLength.load() &&
-        loopMode.load() != static_cast<int>(LoopMode::Bars)) {
-      auto *param = apvts.getParameter("max_loop_length");
-      if (param) {
-        float normalized =
-            param->getNormalisableRange().convertTo0to1(recordedSec);
-        param->setValueNotifyingHost(normalized);
-      }
+    if (writePosition == 0) {
+      // Nothing recorded yet — back to EMPTY instead of a 0-length loop
+      resetLooperToEmpty();
+      return;
     }
-
-    readPosition = 0;
-    activeLayerIdx = -1;
-    hasUndoLayer.store(false);
+    // Finish recording base layer, start playback
+    finishBaseLayer(writePosition);
     currentState = LooperState::PLAYING;
     break;
   }
 
   case LooperState::PLAYING:
     // Start overdubbing on a new layer (or arm if arm-toggle enabled)
-    if (overdubArmed) {
-      // Already armed — toggle OFF (disarm)
-      overdubArmed = false;
-      overdubArmedForUI.store(false);
-    } else if (overdubArmEnabled.load() && numLayers < maxLayerCount.load() &&
-               masterLoopLength > 0) {
-      // Arm: queue overdub for next loop boundary
-      overdubArmed = true;
-      overdubArmedForUI.store(true);
-    } else if (numLayers < maxLayerCount.load() && masterLoopLength > 0) {
-      activeLayerIdx = numLayers;
-      numLayers++;
-
-      // Clear the new layer prefix up to the start point (fast)
-      auto &newLayer = layers[static_cast<size_t>(activeLayerIdx)];
-      int prefixSamples = std::min(readPosition, maxLoopSamples);
-      if (prefixSamples > 0) {
-        juce::FloatVectorOperations::clear(newLayer.bufferL.data(),
-                                           prefixSamples);
-        juce::FloatVectorOperations::clear(newLayer.bufferR.data(),
-                                           prefixSamples);
-      }
-      newLayer.length = 0;
-      footswitchAutoOverdub = false;
-      hasUndoLayer.store(true);
-      writePosition = readPosition;
-      currentState = LooperState::OVERDUBBING;
-    }
+    toggleArmOrStartOverdub(false);
     break;
 
   case LooperState::OVERDUBBING:
     // Stop overdubbing, finalize layer, continue playback
-    if (activeLayerIdx >= 0 && activeLayerIdx < MAX_LAYERS) {
-      auto &layer = layers[static_cast<size_t>(activeLayerIdx)];
-      const int currentMode = loopMode.load();
-
-      if (currentMode == static_cast<int>(LoopMode::Dynamic)) {
-        // Dynamic Mode: If extended past master loop, use readPosition as
-        // length
-        layer.length =
-            (readPosition > masterLoopLength) ? readPosition : masterLoopLength;
-
-        // Recalculate master loop length
-        masterLoopLength = 0;
-        for (int i = 0; i < numLayers; ++i)
-          masterLoopLength =
-              std::max(masterLoopLength, layers[static_cast<size_t>(i)].length);
-
-        loopLengthSeconds.store(static_cast<float>(masterLoopLength) /
-                                static_cast<float>(currentSampleRate));
-      } else {
-        // Classic or Bars Mode: layer length = master loop length (locked)
-        layer.length = masterLoopLength;
-      }
-      readPosition = readPosition % masterLoopLength;
-    }
-    activeLayerIdx = -1;
-    footswitchAutoOverdub = false;
-    hasUndoLayer.store(numLayers > 1);
+    finalizeOverdubLayer();
     currentState = LooperState::PLAYING;
     break;
 
   case LooperState::STOPPED:
     // Start overdubbing from stopped state on a new layer
-    if (numLayers < maxLayerCount.load() && masterLoopLength > 0) {
-      activeLayerIdx = numLayers;
-      numLayers++;
-      auto &newLayer = layers[static_cast<size_t>(activeLayerIdx)];
-      // Starting from stopped (pos 0), only clear a small head start
-      juce::FloatVectorOperations::clear(newLayer.bufferL.data(),
-                                         std::min(1024, maxLoopSamples));
-      juce::FloatVectorOperations::clear(newLayer.bufferR.data(),
-                                         std::min(1024, maxLoopSamples));
-      newLayer.length = 0;
-      footswitchAutoOverdub = false;
-      hasUndoLayer.store(true);
-      readPosition = 0;
-      writePosition = 0;
-      currentState = LooperState::OVERDUBBING;
-    }
+    startOverdubLayer(0);
     break;
   }
 
@@ -1034,83 +1320,18 @@ void OrbitLooperAudioProcessor::handleOverdubTrigger() {
   // Dedicated overdub: only from PLAYING, STOPPED, or OVERDUBBING
   switch (currentState) {
   case LooperState::PLAYING:
-    if (overdubArmed) {
-      // Already armed — toggle OFF (disarm)
-      overdubArmed = false;
-      overdubArmedForUI.store(false);
-    } else if (overdubArmEnabled.load() && numLayers < maxLayerCount.load() &&
-               masterLoopLength > 0) {
-      // Arm: queue overdub for next loop boundary
-      overdubArmed = true;
-      overdubArmedForUI.store(true);
-    } else if (numLayers < maxLayerCount.load() && masterLoopLength > 0) {
-      // Arm disabled — immediate overdub (original behavior)
-      activeLayerIdx = numLayers;
-      numLayers++;
-      auto &newLayer = layers[static_cast<size_t>(activeLayerIdx)];
-
-      // Clear prefix up to current position
-      int prefixSamples = std::min(readPosition, maxLoopSamples);
-      if (prefixSamples > 0) {
-        juce::FloatVectorOperations::clear(newLayer.bufferL.data(),
-                                           prefixSamples);
-        juce::FloatVectorOperations::clear(newLayer.bufferR.data(),
-                                           prefixSamples);
-      }
-
-      newLayer.length = 0;
-      footswitchAutoOverdub = false;
-      hasUndoLayer.store(true);
-      writePosition = readPosition;
-      currentState = LooperState::OVERDUBBING;
-    }
+    toggleArmOrStartOverdub(false);
     break;
 
   case LooperState::OVERDUBBING:
     // Stop overdubbing, finalize layer, continue playback
-    if (activeLayerIdx >= 0 && activeLayerIdx < MAX_LAYERS) {
-      auto &layer = layers[static_cast<size_t>(activeLayerIdx)];
-      const int currentMode = loopMode.load();
-
-      if (currentMode == static_cast<int>(LoopMode::Dynamic)) {
-        layer.length =
-            (readPosition > masterLoopLength) ? readPosition : masterLoopLength;
-        masterLoopLength = 0;
-        for (int i = 0; i < numLayers; ++i)
-          masterLoopLength =
-              std::max(masterLoopLength, layers[static_cast<size_t>(i)].length);
-
-        loopLengthSeconds.store(static_cast<float>(masterLoopLength) /
-                                static_cast<float>(currentSampleRate));
-      } else {
-        layer.length = masterLoopLength;
-      }
-      readPosition = readPosition % masterLoopLength;
-    }
-    activeLayerIdx = -1;
-    footswitchAutoOverdub = false;
-    hasUndoLayer.store(numLayers > 1);
+    finalizeOverdubLayer();
     currentState = LooperState::PLAYING;
     break;
 
   case LooperState::STOPPED:
     // Start overdubbing from stopped state
-    if (numLayers < maxLayerCount.load() && masterLoopLength > 0) {
-      activeLayerIdx = numLayers;
-      numLayers++;
-      auto &newLayer = layers[static_cast<size_t>(activeLayerIdx)];
-      // Starting from stopped (pos 0), only clear a small head start
-      juce::FloatVectorOperations::clear(newLayer.bufferL.data(),
-                                         std::min(1024, maxLoopSamples));
-      juce::FloatVectorOperations::clear(newLayer.bufferR.data(),
-                                         std::min(1024, maxLoopSamples));
-      newLayer.length = 0;
-      footswitchAutoOverdub = false;
-      hasUndoLayer.store(true);
-      readPosition = 0;
-      writePosition = 0;
-      currentState = LooperState::OVERDUBBING;
-    }
+    startOverdubLayer(0);
     break;
 
   case LooperState::EMPTY:
@@ -1139,37 +1360,10 @@ void OrbitLooperAudioProcessor::handleFootswitchSinglePress() {
     break;
 
   case LooperState::PLAYING:
-    // Footswitch into overdub: respect arm toggle
-    if (overdubArmed) {
-      overdubArmed = false;
-      overdubArmedForUI.store(false);
-    } else if (overdubArmEnabled.load() && numLayers < maxLayerCount.load() &&
-               masterLoopLength > 0) {
-      overdubArmed = true;
-      overdubArmedForUI.store(true);
-    } else if (numLayers < maxLayerCount.load() && masterLoopLength > 0) {
-      activeLayerIdx = numLayers;
-      numLayers++;
-      auto &newLayer = layers[static_cast<size_t>(activeLayerIdx)];
-
-      // Clear prefix up to current position
-      int prefixSamples = std::min(readPosition, maxLoopSamples);
-      if (prefixSamples > 0) {
-        juce::FloatVectorOperations::clear(newLayer.bufferL.data(),
-                                           prefixSamples);
-        juce::FloatVectorOperations::clear(newLayer.bufferR.data(),
-                                           prefixSamples);
-      }
-
-      newLayer.length = 0;
-      // Mark as footswitch-initiated if there are previous overdubs to undo
-      footswitchAutoOverdub =
-          (numLayers > 2); // > 2 because we just incremented
-      hasUndoLayer.store(true);
-      writePosition = readPosition;
-      currentState = LooperState::OVERDUBBING;
-      looperState.store(static_cast<int>(currentState));
-    }
+    // Footswitch into overdub: respect arm toggle. Footswitch-initiated
+    // overdubs get the 2-layer undo treatment (see pendingUndo).
+    toggleArmOrStartOverdub(true);
+    looperState.store(static_cast<int>(currentState));
     break;
 
   case LooperState::EMPTY:
@@ -1185,36 +1379,15 @@ void OrbitLooperAudioProcessor::handleFootswitchDoublePress() {
   // If held, this state transition enables "Stop & Clear" in
   // handleFootswitchLongPress.
   if (currentState == LooperState::RECORDING) {
-    layers[0].length = writePosition;
-    numLayers = 1;
-    masterLoopLength = writePosition;
-    loopLengthSeconds.store(static_cast<float>(masterLoopLength) /
-                            static_cast<float>(currentSampleRate));
-    readPosition = 0;
-    activeLayerIdx = -1;
-  } else if (currentState == LooperState::OVERDUBBING) {
-    // Finalize current overdub layer
-    if (activeLayerIdx >= 0 && activeLayerIdx < MAX_LAYERS) {
-      auto &layer = layers[static_cast<size_t>(activeLayerIdx)];
-      const int currentMode = loopMode.load();
-      if (currentMode != static_cast<int>(LoopMode::Dynamic)) {
-        layer.length = masterLoopLength;
-      } else {
-        layer.length =
-            (readPosition > masterLoopLength) ? readPosition : masterLoopLength;
-
-        masterLoopLength = 0;
-        for (int i = 0; i < numLayers; ++i)
-          masterLoopLength =
-              std::max(masterLoopLength, layers[static_cast<size_t>(i)].length);
-
-        loopLengthSeconds.store(static_cast<float>(masterLoopLength) /
-                                static_cast<float>(currentSampleRate));
-      }
-      readPosition = readPosition % masterLoopLength;
+    if (writePosition == 0) {
+      // Nothing recorded yet — avoid a zombie 0-length loop
+      resetLooperToEmpty();
+      return;
     }
-    activeLayerIdx = -1;
-    footswitchAutoOverdub = false;
+    // Finalize base layer (no auto-length push on the double-press stop path)
+    finishBaseLayer(writePosition);
+  } else if (currentState == LooperState::OVERDUBBING) {
+    finalizeOverdubLayer();
   }
   if (currentState != LooperState::EMPTY) {
     overdubArmed = false;
@@ -1314,20 +1487,9 @@ void OrbitLooperAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
   // Process pending state changes
   processStateChanges();
 
-  // Sync max loop length -> buffer size
-  {
-    const float targetMaxSec = maxLoopSeconds.load();
-
-    if (targetMaxSec != currentMaxAllocatedSeconds &&
-        currentState == LooperState::EMPTY) {
-      currentMaxAllocatedSeconds = targetMaxSec;
-      maxLoopSamples = static_cast<int>(currentSampleRate * targetMaxSec);
-      for (auto &layer : layers) {
-        layer.bufferL.resize(static_cast<size_t>(maxLoopSamples), 0.0f);
-        layer.bufferR.resize(static_cast<size_t>(maxLoopSamples), 0.0f);
-      }
-    }
-  }
+  // NOTE: layer storage is never (re)allocated here — all allocation happens
+  // on the message thread (handleAsyncUpdate). The audio thread only claims
+  // published capacity (see startOverdubLayer).
 
   // Get parameters
   const float loopLevelPercent =
@@ -1422,9 +1584,10 @@ void OrbitLooperAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
   case LooperState::RECORDING: {
     // Record input into base layer (layer 0), pass-through dry signal
     auto &baseLayer = layers[0];
+    const int cap0 = baseLayer.capacity.load();
     // Clear ahead to avoid stale data (block-level for efficiency)
     int clearStart = writePosition;
-    int clearEnd = std::min(writePosition + numSamples + 1024, maxLoopSamples);
+    int clearEnd = std::min(writePosition + numSamples + 1024, cap0);
     if (clearStart < clearEnd) {
       juce::FloatVectorOperations::clear(baseLayer.bufferL.data() + clearStart,
                                          clearEnd - clearStart);
@@ -1432,9 +1595,13 @@ void OrbitLooperAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
                                          clearEnd - clearStart);
     }
 
+    // Fixed Length Modes (Classic/Bars): auto-stop at the locked length
+    const bool recNonDynamicMode =
+        (loopMode.load() != static_cast<int>(LoopMode::Dynamic));
+
     for (int i = 0; i < numSamples; ++i) {
       float inMono = (inputL[i] + inputR[i]) * 0.5f;
-      if (writePosition < maxLoopSamples) {
+      if (writePosition < cap0) {
         baseLayer.bufferL[static_cast<size_t>(writePosition)] = inMono * inPanL;
         baseLayer.bufferR[static_cast<size_t>(writePosition)] = inMono * inPanR;
         writePosition++;
@@ -1446,48 +1613,18 @@ void OrbitLooperAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
       peakOut = std::max(peakOut,
                          std::max(std::abs(outputL[i]), std::abs(outputR[i])));
 
-      // Fixed Length Modes (Classic/Bars): Auto-stop recording at calculated
-      // length
-      const int currentMode = loopMode.load();
-      const bool nonDynamicMode =
-          (currentMode != static_cast<int>(LoopMode::Dynamic));
-      if (nonDynamicMode && masterLoopLength > 0 &&
+      if (recNonDynamicMode && masterLoopLength > 0 &&
           writePosition >= masterLoopLength) {
-        baseLayer.length = masterLoopLength;
-        numLayers = 1;
-        loopLengthSeconds.store(static_cast<float>(masterLoopLength) /
-                                static_cast<float>(currentSampleRate));
-
-        readPosition = 0;
-        activeLayerIdx = -1;
+        finishBaseLayer(masterLoopLength);
         currentState = LooperState::PLAYING;
         looperState.store(static_cast<int>(LooperState::PLAYING));
         break;
       }
     }
 
-    // If we've hit max length, auto-stop recording
-    if (writePosition >= maxLoopSamples) {
-      baseLayer.length = maxLoopSamples;
-      numLayers = 1;
-      masterLoopLength = maxLoopSamples;
-      float recordedSec = static_cast<float>(masterLoopLength) /
-                          static_cast<float>(currentSampleRate);
-      loopLengthSeconds.store(recordedSec);
-
-      // Auto Length: Automatically set the new loop value on the max length
-      // slider
-      if (isAutoLength.load()) {
-        auto *param = apvts.getParameter("max_loop_length");
-        if (param) {
-          float normalized =
-              param->getNormalisableRange().convertTo0to1(recordedSec);
-          param->setValueNotifyingHost(normalized);
-        }
-      }
-
-      readPosition = 0;
-      activeLayerIdx = -1;
+    // If we've hit the end of the tape (Global Max), auto-stop recording
+    if (currentState == LooperState::RECORDING && writePosition >= cap0) {
+      finishBaseLayer(cap0);
       currentState = LooperState::PLAYING;
       looperState.store(static_cast<int>(LooperState::PLAYING));
     }
@@ -1505,15 +1642,23 @@ void OrbitLooperAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
       break;
     }
 
-    // Sum all layers with modulo: Position_layer = CurrentTime % Length_layer
+    // Sum all layers; per-layer positions tracked incrementally so the hot
+    // loop has no per-sample integer division (shorter layers tile)
+    int layerPos[MAX_LAYERS];
+    for (int l = 0; l < numLayers; ++l) {
+      const int len = layers[static_cast<size_t>(l)].length;
+      layerPos[l] = len > 0 ? readPosition % len : 0;
+    }
+
     for (int i = 0; i < numSamples; ++i) {
       float sumL = 0.0f, sumR = 0.0f;
       for (int l = 0; l < numLayers; ++l) {
         const auto &layer = layers[static_cast<size_t>(l)];
         if (layer.length > 0) {
-          int layerPos = readPosition % layer.length;
-          sumL += layer.bufferL[static_cast<size_t>(layerPos)];
-          sumR += layer.bufferR[static_cast<size_t>(layerPos)];
+          sumL += layer.bufferL[static_cast<size_t>(layerPos[l])];
+          sumR += layer.bufferR[static_cast<size_t>(layerPos[l])];
+          if (++layerPos[l] >= layer.length)
+            layerPos[l] = 0;
         }
       }
 
@@ -1526,35 +1671,24 @@ void OrbitLooperAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
       int prevPos = readPosition;
       readPosition = (readPosition + 1) % masterLoopLength;
 
-      // Overdub Arm: detect loop boundary (wrap from end to 0)
-      if (overdubArmed && readPosition < prevPos) {
-        // Loop just restarted — engage overdub
-        overdubArmed = false;
-        overdubArmedForUI.store(false);
-        if (numLayers < maxLayerCount.load()) {
-          activeLayerIdx = numLayers;
-          numLayers++;
-          auto &newLayer = layers[static_cast<size_t>(activeLayerIdx)];
+      if (readPosition < prevPos) {
+        // Master loop wrapped to 0 — resync tiling positions
+        for (int l = 0; l < numLayers; ++l)
+          layerPos[l] = 0;
 
-          // Clear prefix up to current position (fast)
-          int prefixSamples = std::min(readPosition, maxLoopSamples);
-          if (prefixSamples > 0) {
-            juce::FloatVectorOperations::clear(newLayer.bufferL.data(),
-                                               prefixSamples);
-            juce::FloatVectorOperations::clear(newLayer.bufferR.data(),
-                                               prefixSamples);
+        // Overdub Arm: engage at the loop boundary
+        if (overdubArmed) {
+          overdubArmed = false;
+          overdubArmedForUI.store(false);
+          if (startOverdubLayer(readPosition)) {
+            looperState.store(static_cast<int>(LooperState::OVERDUBBING));
+            // Continue the remainder of the block in OVERDUBBING so no dry
+            // input leaks through unprocessed at the boundary.
+            renderOverdubSegment(inputL, inputR, outputL, outputR, i + 1,
+                                 numSamples, isInputMuted, inPanL, inPanR,
+                                 loopLevel, peakOut);
+            break;
           }
-
-          newLayer.length = 0;
-          footswitchAutoOverdub = false;
-          hasUndoLayer.store(true);
-          writePosition = readPosition;
-          currentState = LooperState::OVERDUBBING;
-          looperState.store(static_cast<int>(LooperState::OVERDUBBING));
-          // Continue remaining samples in OVERDUBBING — but for simplicity
-          // the next processBlock will handle it. The few missed samples
-          // at the boundary are imperceptible.
-          break;
         }
       }
     }
@@ -1563,150 +1697,8 @@ void OrbitLooperAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
   }
 
   case LooperState::OVERDUBBING: {
-    if (masterLoopLength <= 0 || activeLayerIdx < 0 ||
-        activeLayerIdx >= MAX_LAYERS) {
-      for (int i = 0; i < numSamples; ++i) {
-        outputL[i] = isInputMuted ? 0.0f : inputL[i];
-        outputR[i] = isInputMuted ? 0.0f : inputR[i];
-      }
-      break;
-    }
-
-    auto &activeLayer = layers[static_cast<size_t>(activeLayerIdx)];
-
-    // Clear ahead to avoid stale data
-    const int currentMode = loopMode.load();
-    const bool nonDynamicMode =
-        (currentMode != static_cast<int>(LoopMode::Dynamic));
-    int clearStartIdx =
-        nonDynamicMode ? (readPosition % masterLoopLength) : readPosition;
-    int clearEndIdx =
-        std::min(clearStartIdx + numSamples + 1024, maxLoopSamples);
-    if (clearStartIdx < clearEndIdx) {
-      juce::FloatVectorOperations::clear(activeLayer.bufferL.data() +
-                                             clearStartIdx,
-                                         clearEndIdx - clearStartIdx);
-      juce::FloatVectorOperations::clear(activeLayer.bufferR.data() +
-                                             clearStartIdx,
-                                         clearEndIdx - clearStartIdx);
-    }
-
-    // Overdub: write input to new layer while summing all existing layers
-    // Classic Mode: auto-stop overdub when readPosition reaches
-    // masterLoopLength Dynamic Mode: readPosition advances linearly (can extend
-    // past masterLoopLength) Existing layers read at (readPosition %
-    // layerLength) — shorter layers tile
-    for (int i = 0; i < numSamples; ++i) {
-      // In non-dynamic modes, use modulo for buffer write position but track
-      // linear readPosition
-      int writePos =
-          nonDynamicMode ? (readPosition % masterLoopLength) : readPosition;
-
-      // Sum all complete layers (not the active one being recorded)
-      float sumL = 0.0f, sumR = 0.0f;
-      for (int l = 0; l < numLayers; ++l) {
-        if (l == activeLayerIdx)
-          continue; // Skip the layer being recorded
-        const auto &layer = layers[static_cast<size_t>(l)];
-        if (layer.length > 0) {
-          int layerPos = writePos % layer.length;
-          sumL += layer.bufferL[static_cast<size_t>(layerPos)];
-          sumR += layer.bufferR[static_cast<size_t>(layerPos)];
-        }
-      }
-
-      // Write input to active layer at current position
-      float inMono = (inputL[i] + inputR[i]) * 0.5f;
-      if (writePos < maxLoopSamples) {
-        activeLayer.bufferL[static_cast<size_t>(writePos)] = inMono * inPanL;
-        activeLayer.bufferR[static_cast<size_t>(writePos)] = inMono * inPanR;
-      }
-
-      // Output: dry input + sum of existing layers at loop level
-      outputL[i] = (isInputMuted ? 0.0f : inMono * inPanL) + sumL * loopLevel;
-      outputR[i] = (isInputMuted ? 0.0f : inMono * inPanR) + sumR * loopLevel;
-      peakOut = std::max(peakOut,
-                         std::max(std::abs(outputL[i]), std::abs(outputR[i])));
-
-      readPosition++;
-
-      // Non-dynamic modes: auto-stop overdub at loop boundary (OVERDUB → PLAY)
-      if (nonDynamicMode && readPosition >= masterLoopLength) {
-        activeLayer.length = masterLoopLength;
-        readPosition = readPosition % masterLoopLength;
-        activeLayerIdx = -1;
-        footswitchAutoOverdub = false;
-        hasUndoLayer.store(numLayers > 1);
-        currentState = LooperState::PLAYING;
-        looperState.store(static_cast<int>(LooperState::PLAYING));
-
-        // Process remaining samples as PLAYING
-        for (int j = i + 1; j < numSamples; ++j) {
-          float pSumL = 0.0f, pSumR = 0.0f;
-          for (int l = 0; l < numLayers; ++l) {
-            const auto &layer = layers[static_cast<size_t>(l)];
-            if (layer.length > 0) {
-              int layerPos = readPosition % layer.length;
-              pSumL += layer.bufferL[static_cast<size_t>(layerPos)];
-              pSumR += layer.bufferR[static_cast<size_t>(layerPos)];
-            }
-          }
-          float inMonoJ = (inputL[j] + inputR[j]) * 0.5f;
-          outputL[j] =
-              (isInputMuted ? 0.0f : inMonoJ * inPanL) + pSumL * loopLevel;
-          outputR[j] =
-              (isInputMuted ? 0.0f : inMonoJ * inPanR) + pSumR * loopLevel;
-          peakOut = std::max(
-              peakOut, std::max(std::abs(outputL[j]), std::abs(outputR[j])));
-          readPosition = (readPosition + 1) % masterLoopLength;
-        }
-        break;
-      }
-
-      // Dynamic Mode: auto-stop overdub if we hit max buffer
-      if (!nonDynamicMode && readPosition >= maxLoopSamples) {
-        activeLayer.length = maxLoopSamples;
-        masterLoopLength = 0;
-        for (int l = 0; l < numLayers; ++l)
-          masterLoopLength =
-              std::max(masterLoopLength, layers[static_cast<size_t>(l)].length);
-
-        loopLengthSeconds.store(static_cast<float>(masterLoopLength) /
-                                static_cast<float>(currentSampleRate));
-        readPosition = 0;
-        activeLayerIdx = -1;
-        footswitchAutoOverdub = false;
-        hasUndoLayer.store(numLayers > 1);
-        currentState = LooperState::PLAYING;
-        looperState.store(static_cast<int>(LooperState::PLAYING));
-
-        // Process remaining samples as PLAYING
-        for (int j = i + 1; j < numSamples; ++j) {
-          float pSumL = 0.0f, pSumR = 0.0f;
-          for (int l = 0; l < numLayers; ++l) {
-            const auto &layer = layers[static_cast<size_t>(l)];
-            if (layer.length > 0) {
-              int layerPos = readPosition % layer.length;
-              pSumL += layer.bufferL[static_cast<size_t>(layerPos)];
-              pSumR += layer.bufferR[static_cast<size_t>(layerPos)];
-            }
-          }
-          float inMonoJ = (inputL[j] + inputR[j]) * 0.5f;
-          outputL[j] =
-              (isInputMuted ? 0.0f : inMonoJ * inPanL) + pSumL * loopLevel;
-          outputR[j] =
-              (isInputMuted ? 0.0f : inMonoJ * inPanR) + pSumR * loopLevel;
-          peakOut = std::max(
-              peakOut, std::max(std::abs(outputL[j]), std::abs(outputR[j])));
-          readPosition = (readPosition + 1) % masterLoopLength;
-        }
-        break;
-      }
-    }
-
-    // Keep write position in sync for state transitions
-    writePosition = readPosition;
-
+    renderOverdubSegment(inputL, inputR, outputL, outputR, 0, numSamples,
+                         isInputMuted, inPanL, inPanR, loopLevel, peakOut);
     break;
   }
   }
@@ -1750,19 +1742,15 @@ void OrbitLooperAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
     playbackPosition.store(static_cast<float>(readPosition) /
                            static_cast<float>(masterLoopLength));
   } else if (currentState == LooperState::RECORDING && writePosition > 0) {
-    // During recording, show progress relative to the "Max Length" slider for
-    // UI sync. Even in Auto Length mode where the internal buffer is larger
-    // (30m), the UI still uses the slider value to scale the normalized
-    // position back to time.
-    float sliderMaxSec = apvts.getRawParameterValue("max_loop_length")->load();
-    float sliderMaxSamples =
-        sliderMaxSec * static_cast<float>(currentSampleRate);
-
-    if (sliderMaxSamples > 0)
-      playbackPosition.store(static_cast<float>(writePosition) /
-                             sliderMaxSamples);
-    else
-      playbackPosition.store(0.0f);
+    // During recording, show progress toward the point recording will
+    // auto-stop: the locked master length (Classic/Bars) or the full tape
+    // (Dynamic). Matches recordBasisSeconds sent to the UI.
+    const int basisSamples =
+        masterLoopLength > 0 ? masterLoopLength : layers[0].capacity.load();
+    playbackPosition.store(basisSamples > 0
+                               ? static_cast<float>(writePosition) /
+                                     static_cast<float>(basisSamples)
+                               : 0.0f);
   } else {
     playbackPosition.store(0.0f);
   }
@@ -1777,7 +1765,28 @@ juce::AudioProcessorEditor *OrbitLooperAudioProcessor::createEditor() {
 
 //==============================================================================
 void OrbitLooperAudioProcessor::exportLoopToWav(const juce::File &file) {
-  if (masterLoopLength <= 0 || numLayers <= 0)
+  // Message-thread mixdown. Only export while the loop is stable — in
+  // RECORDING/OVERDUBBING the audio thread is writing the very buffers we
+  // would read. Snapshot counts/lengths first and clamp by the published
+  // capacities so a concurrent trigger can at worst glitch the file, never
+  // read out of bounds.
+  const int state = looperState.load();
+  if (state != static_cast<int>(LooperState::PLAYING) &&
+      state != static_cast<int>(LooperState::STOPPED))
+    return;
+
+  const int layerCount =
+      std::clamp(layersInUseAtomic.load(), 0, static_cast<int>(MAX_LAYERS));
+  int layerLengths[MAX_LAYERS] = {};
+  int exportMaster = 0;
+  for (int l = 0; l < layerCount; ++l) {
+    const auto &layer = layers[static_cast<size_t>(l)];
+    layerLengths[l] =
+        std::clamp(layer.length, 0, layer.capacity.load());
+    exportMaster = std::max(exportMaster, layerLengths[l]);
+  }
+
+  if (exportMaster <= 0 || layerCount <= 0)
     return;
 
   // Delete existing file if any
@@ -1801,14 +1810,15 @@ void OrbitLooperAudioProcessor::exportLoopToWav(const juce::File &file) {
 
   if (writer != nullptr) {
     // Mix down all layers into a single buffer using modulo per layer
-    juce::AudioBuffer<float> exportBuffer(numChannels, masterLoopLength);
+    juce::AudioBuffer<float> exportBuffer(numChannels, exportMaster);
     exportBuffer.clear();
 
-    for (int l = 0; l < numLayers; ++l) {
+    for (int l = 0; l < layerCount; ++l) {
       const auto &layer = layers[static_cast<size_t>(l)];
-      if (layer.length > 0) {
-        for (int s = 0; s < masterLoopLength; ++s) {
-          int layerPos = s % layer.length;
+      const int len = layerLengths[l];
+      if (len > 0) {
+        for (int s = 0; s < exportMaster; ++s) {
+          int layerPos = s % len;
           exportBuffer.addSample(0, s,
                                  layer.bufferL[static_cast<size_t>(layerPos)]);
           exportBuffer.addSample(1, s,
@@ -1817,7 +1827,13 @@ void OrbitLooperAudioProcessor::exportLoopToWav(const juce::File &file) {
       }
     }
 
-    writer->writeFromAudioSampleBuffer(exportBuffer, 0, masterLoopLength);
+    // Match playback: apply loop_level so the file sounds like what the user
+    // hears, and so summing up to 8 layers can't trivially clip the 24-bit int.
+    const float exportLoopLevel =
+        apvts.getRawParameterValue("loop_level")->load() / 100.0f;
+    exportBuffer.applyGain(exportLoopLevel);
+
+    writer->writeFromAudioSampleBuffer(exportBuffer, 0, exportMaster);
   }
 }
 
@@ -1827,46 +1843,22 @@ void OrbitLooperAudioProcessor::getStateInformation(
   auto state = apvts.copyState();
   state.setProperty("maxLoopSeconds", maxLoopSeconds.load(), nullptr);
 
-  // Save MIDI CC mappings
-  state.setProperty("midiCC_record", getMidiCC(MidiAction::Record), nullptr);
-  state.setProperty("midiCC_stop", getMidiCC(MidiAction::Stop), nullptr);
-  state.setProperty("midiCC_clear", getMidiCC(MidiAction::Clear), nullptr);
-  state.setProperty("midiCC_undo", getMidiCC(MidiAction::Undo), nullptr);
-  state.setProperty("midiCC_footswitch", getMidiCC(MidiAction::Footswitch),
-                    nullptr);
-  state.setProperty("midiCC_overdub", getMidiCC(MidiAction::Overdub), nullptr);
-  state.setProperty("midiCC_barmode", getMidiCC(MidiAction::BarMode), nullptr);
-  state.setProperty("midiCC_click", getMidiCC(MidiAction::Click), nullptr);
-  state.setProperty("midiCC_precount", getMidiCC(MidiAction::PreCount),
-                    nullptr);
-  state.setProperty("midiCC_armoverdub", getMidiCC(MidiAction::ArmOverdub),
-                    nullptr);
-  state.setProperty("midiCC_playclick", getMidiCC(MidiAction::PlayClick),
-                    nullptr);
-  state.setProperty("midiCC_play", getMidiCC(MidiAction::Play), nullptr);
-  state.setProperty("midiCC_monitor", getMidiCC(MidiAction::Monitor), nullptr);
-  state.setProperty("midiCC_loopmodecycle",
-                    getMidiCC(MidiAction::LoopModeCycle), nullptr);
-  state.setProperty("midiCC_classicmode", getMidiCC(MidiAction::ClassicMode),
-                    nullptr);
-  state.setProperty("midiCC_beatsmode", getMidiCC(MidiAction::BeatsMode),
-                    nullptr);
-  state.setProperty("midiCC_dynamicmode", getMidiCC(MidiAction::DynamicMode),
-                    nullptr);
-  state.setProperty("midiCC_paninputleft", getMidiCC(MidiAction::PanInputLeft),
-                    nullptr);
-  state.setProperty("midiCC_paninputcenter",
-                    getMidiCC(MidiAction::PanInputCenter), nullptr);
-  state.setProperty("midiCC_paninputright",
-                    getMidiCC(MidiAction::PanInputRight), nullptr);
+  // Save MIDI CC mappings (table-driven; key = "midiCC_" + lowercase name)
+  {
+    const auto &actionNames = getMidiActionNames();
+    for (int i = 0; i < NUM_MIDI_ACTIONS; ++i)
+      state.setProperty("midiCC_" + juce::String(
+                                        actionNames[static_cast<size_t>(i)])
+                                        .toLowerCase(),
+                        getMidiCC(static_cast<MidiAction>(i)), nullptr);
+  }
 
   // Save key bindings
   for (int i = 0; i < NUM_KEY_ACTIONS; ++i)
     state.setProperty("keyBind_" + juce::String(i), keyBindings[i], nullptr);
 
-  // Save Loop Mode and Auto Length state
+  // Save Loop Mode state
   state.setProperty("loopMode", loopMode.load(), nullptr);
-  state.setProperty("autoLength", isAutoLength.load() ? 1 : 0, nullptr);
   state.setProperty("maxLayerCount", maxLayerCount.load(), nullptr);
   state.setProperty("muteOnStartup", muteOnStartup.load() ? 1 : 0, nullptr);
   state.setProperty("inputMuted", inputMuted.load() ? 1 : 0, nullptr);
@@ -1884,70 +1876,21 @@ void OrbitLooperAudioProcessor::setStateInformation(const void *data,
     if (xmlState->hasTagName(apvts.state.getType())) {
       auto tree = juce::ValueTree::fromXml(*xmlState);
       if (tree.hasProperty("maxLoopSeconds"))
-        maxLoopSeconds.store(
+        setMaxLoopLength( // clamps + resizes storage on the message thread
             static_cast<float>(tree.getProperty("maxLoopSeconds")));
 
-      // Restore MIDI CC mappings
-      if (tree.hasProperty("midiCC_record"))
-        setMidiCC(MidiAction::Record,
-                  static_cast<int>(tree.getProperty("midiCC_record")));
-      if (tree.hasProperty("midiCC_stop"))
-        setMidiCC(MidiAction::Stop,
-                  static_cast<int>(tree.getProperty("midiCC_stop")));
-      if (tree.hasProperty("midiCC_clear"))
-        setMidiCC(MidiAction::Clear,
-                  static_cast<int>(tree.getProperty("midiCC_clear")));
-      if (tree.hasProperty("midiCC_undo"))
-        setMidiCC(MidiAction::Undo,
-                  static_cast<int>(tree.getProperty("midiCC_undo")));
-      if (tree.hasProperty("midiCC_footswitch"))
-        setMidiCC(MidiAction::Footswitch,
-                  static_cast<int>(tree.getProperty("midiCC_footswitch")));
-      if (tree.hasProperty("midiCC_overdub"))
-        setMidiCC(MidiAction::Overdub,
-                  static_cast<int>(tree.getProperty("midiCC_overdub")));
-      if (tree.hasProperty("midiCC_barmode"))
-        setMidiCC(MidiAction::BarMode,
-                  static_cast<int>(tree.getProperty("midiCC_barmode")));
-      if (tree.hasProperty("midiCC_click"))
-        setMidiCC(MidiAction::Click,
-                  static_cast<int>(tree.getProperty("midiCC_click")));
-      if (tree.hasProperty("midiCC_precount"))
-        setMidiCC(MidiAction::PreCount,
-                  static_cast<int>(tree.getProperty("midiCC_precount")));
-      if (tree.hasProperty("midiCC_armoverdub"))
-        setMidiCC(MidiAction::ArmOverdub,
-                  static_cast<int>(tree.getProperty("midiCC_armoverdub")));
-      if (tree.hasProperty("midiCC_playclick"))
-        setMidiCC(MidiAction::PlayClick,
-                  static_cast<int>(tree.getProperty("midiCC_playclick")));
-      if (tree.hasProperty("midiCC_play"))
-        setMidiCC(MidiAction::Play,
-                  static_cast<int>(tree.getProperty("midiCC_play")));
-      if (tree.hasProperty("midiCC_monitor"))
-        setMidiCC(MidiAction::Monitor,
-                  static_cast<int>(tree.getProperty("midiCC_monitor")));
-      if (tree.hasProperty("midiCC_loopmodecycle"))
-        setMidiCC(MidiAction::LoopModeCycle,
-                  static_cast<int>(tree.getProperty("midiCC_loopmodecycle")));
-      if (tree.hasProperty("midiCC_classicmode"))
-        setMidiCC(MidiAction::ClassicMode,
-                  static_cast<int>(tree.getProperty("midiCC_classicmode")));
-      if (tree.hasProperty("midiCC_beatsmode"))
-        setMidiCC(MidiAction::BeatsMode,
-                  static_cast<int>(tree.getProperty("midiCC_beatsmode")));
-      if (tree.hasProperty("midiCC_dynamicmode"))
-        setMidiCC(MidiAction::DynamicMode,
-                  static_cast<int>(tree.getProperty("midiCC_dynamicmode")));
-      if (tree.hasProperty("midiCC_paninputleft"))
-        setMidiCC(MidiAction::PanInputLeft,
-                  static_cast<int>(tree.getProperty("midiCC_paninputleft")));
-      if (tree.hasProperty("midiCC_paninputcenter"))
-        setMidiCC(MidiAction::PanInputCenter,
-                  static_cast<int>(tree.getProperty("midiCC_paninputcenter")));
-      if (tree.hasProperty("midiCC_paninputright"))
-        setMidiCC(MidiAction::PanInputRight,
-                  static_cast<int>(tree.getProperty("midiCC_paninputright")));
+      // Restore MIDI CC mappings (table-driven; matches getStateInformation)
+      {
+        const auto &actionNames = getMidiActionNames();
+        for (int i = 0; i < NUM_MIDI_ACTIONS; ++i) {
+          const juce::String prop =
+              "midiCC_" +
+              juce::String(actionNames[static_cast<size_t>(i)]).toLowerCase();
+          if (tree.hasProperty(prop))
+            setMidiCC(static_cast<MidiAction>(i),
+                      static_cast<int>(tree.getProperty(prop)));
+        }
+      }
 
       // Restore key bindings
       for (int i = 0; i < NUM_KEY_ACTIONS; ++i) {
@@ -1957,7 +1900,7 @@ void OrbitLooperAudioProcessor::setStateInformation(const void *data,
                         tree.getProperty(propName).toString());
       }
 
-      // Restore Loop Mode and Auto Length state
+      // Restore Loop Mode
       auto *loopModeParam = dynamic_cast<juce::AudioParameterChoice *>(
           apvts.getParameter("loop_mode"));
       if (tree.hasProperty("loopMode")) {
@@ -1968,9 +1911,6 @@ void OrbitLooperAudioProcessor::setStateInformation(const void *data,
               loopModeParam->getNormalisableRange().convertTo0to1(
                   static_cast<float>(savedMode)));
       }
-      if (tree.hasProperty("autoLength"))
-        isAutoLength.store(static_cast<int>(tree.getProperty("autoLength")) !=
-                           0);
       if (tree.hasProperty("maxLayerCount"))
         maxLayerCount.store(
             std::clamp(static_cast<int>(tree.getProperty("maxLayerCount")), 1,

@@ -75,32 +75,33 @@ Detailed architecture and implementation reference for contributors and develope
 
 ```
 OrbitLooper/
-├── CMakeLists.txt                 # Build config (FetchContent for JUCE)
-├── LICENSE                        # MIT license
-├── README.md                      # User documentation
+├── CMakeLists.txt                 # Desktop build (FetchContent for JUCE, patches)
+├── HANDOVER.md                    # Session handover / working notes
 ├── docs/
-│   └── Technical.md               # This file
-├── .github/
-│   └── workflows/
-│       └── build.yml              # CI/CD pipeline
+│   ├── Technical.md               # This file
+│   ├── TechnicalAndroid.md        # Android specifics (build, audio, BT MIDI)
+│   └── UserGuide.md               # End-user guide
+├── android/                       # Gradle wrapper project (wraps CMake)
+├── .github/workflows/build.yml    # CI/CD pipeline
 └── Source/
-    ├── PluginProcessor.h          # DSP class header (~290 lines)
-    ├── PluginProcessor.cpp        # DSP implementation (~1500 lines)
-    ├── PluginEditor.h             # Editor header (~75 lines)
-    ├── PluginEditor.cpp           # WebView setup + timer (~440 lines)
-    ├── ui/
-    │   ├── OrbitLooperWebBrowser.h    # WebView sub-component header
-    │   ├── OrbitLooperWebBrowser.cpp  # Resource provider & JS event relay
-    │   └── public/
-    │       ├── index.html             # Main HTML structure + modal shells
-    │       ├── style.css              # Custom CSS styling
-    │       ├── juce-bridge.js         # SliderState class, JUCE event helpers
-    │       ├── state.js               # Constants, DOM refs, shared mutable state
-    │       ├── ui-controls.js         # Gain/pan sliders, text editing, confirm dialog
-    │       ├── transport.js           # State machine, transport buttons, playback ring
-    │       ├── metronome.js           # Metronome engine, rhythm matrix, beat feedback
-    │       ├── keymapping.js          # MIDI CC panel, key bindings, keyboard dispatch
-    │       └── main.js                # Logging, zoom, modals, settings, init & uiReady
+    ├── PluginProcessor.h/.cpp     # DSP, state machine, MIDI, lazy layer storage
+    ├── PluginEditor.h/.cpp        # WebView setup, 30Hz timer, Android housekeeping
+    ├── BluetoothClassicMidi.h/.cpp# BT Classic MIDI: SPSC queue + JNI bridge (Android)
+    ├── patches/                   # JUCE source patches (Linux WebView, juceaide)
+    └── ui/
+        ├── OrbitLooperWebBrowser.h/.cpp  # Resource provider & JS event listeners
+        └── public/
+            ├── index.html             # Desktop UI
+            ├── mobile-index.html      # Android UI (bottom nav, mute banner)
+            ├── style.css              # ALL CSS (shared + body.mobile overrides)
+            ├── juce-bridge.js         # SliderState class, JUCE event helpers
+            ├── state.js               # Constants, DOM refs, shared mutable state
+            ├── ui-controls.js         # Gain/pan sliders, text editing, confirm dialog
+            ├── transport.js           # State updates, transport buttons, playback ring
+            ├── metronome.js           # Metronome engine, rhythm matrix, beat feedback
+            ├── keymapping.js          # MIDI CC panel, key bindings, keyboard dispatch
+            ├── main.js                # Logging, zoom, modals, settings, init & uiReady
+            └── mobile.js              # Android-only layout/init (loads after main.js)
 ```
 
 ---
@@ -197,13 +198,23 @@ When stopping an overdub:
 
 ### Undo
 
-Undo removes the top layer: `numLayers--`, recalculate `masterLoopLength = max(all layer lengths)`. No separate undo buffer — layers are independent.
+Undo removes the top layer: `numLayers--`, recalculate `masterLoopLength = max(all layer lengths)`. No separate undo buffer — layers are independent. The retired slot is zeroed by the message-thread allocator before it can be reused (its published capacity is set to 0 so the audio thread cannot claim it early).
 
-### Memory
+### Memory (lazy layer storage)
 
-All 8 layers pre-allocated in `prepareToPlay()`. At default 60s / 48kHz:
+Layers are NOT pre-allocated. Storage rules:
 
-$$8 \times 2 \times 60 \times 48000 \times 4 \text{ bytes} \approx 184 \text{ MB}$$
+- **Base layer** (layer 0): allocated in `prepareToPlay` at the Global Max
+  Length ("tape length"). Default 300 s / 48 kHz stereo ≈ 115 MB.
+- **Overdub layers**: allocated on the MESSAGE thread (`handleAsyncUpdate`),
+  one spare ahead of use, sized to the actual master loop (Classic/Bars) or
+  Global Max (Dynamic). A 30 s loop layer costs ~11.5 MB.
+- The audio thread never allocates. It claims a spare via a capacity gate
+  with a publish/re-validate handshake (`startOverdubLayer` ↔
+  `ensureLayerStorage`); if the spare isn't ready (allocation in flight),
+  the overdub trigger is dropped and can simply be pressed again.
+- Undo/clear retire slots (capacity → 0, `needsCleanup`) instead of
+  memsetting on the audio thread; the allocator zeroes/frees them async.
 
 ---
 
@@ -223,9 +234,9 @@ Input Buffer
      ├─── State-Dependent Processing:
      │    ├── EMPTY: Pass-through
      │    ├── RECORDING: Write input to layer[0], pass-through
-     │    ├── PLAYING: Sum all layers at modulo positions → output
+     │    ├── PLAYING: Sum all layers at tiled positions → output + dry input
      │    ├── OVERDUBBING: Sum existing layers + write input to active layer
-     │    └── STOPPED: Silence output
+     │    └── STOPPED: Pass-through (loop kept, not played)
      │
      ├─── Loop Level: Scale playback by loop_level parameter
      │
@@ -263,11 +274,15 @@ This ensures that a single input is always recorded and monitored as a center-pa
 | ID | Type | Range | Default | Unit |
 |----|------|-------|---------|------|
 | `loop_level` | Float | 0–100 | 95 | % |
-| `max_loop_length` | Int | 0–1800 | 60 | seconds |
 | `input_gain` | Float | -60–12 | 0 | dB |
 | `output_gain` | Float | -60–12 | 0 | dB |
 | `input_pan` | Float | -1.0–1.0 | 0 | - |
 | `output_pan` | Float | -1.0–1.0 | 0 | - |
+
+> Loop length is not a host parameter: the **Global Max Length** (Settings
+> modal, persisted in plugin state as `maxLoopSeconds`, default 300 s) is the
+> single loop-length authority — it is the Classic-mode "tape length" and the
+> per-layer allocation ceiling.
 
 ---
 
@@ -366,29 +381,33 @@ When an overdub trigger arrives during PLAYING:
    std::unique_ptr<juce::WebSliderParameterAttachment> loopLevelAttachment;  // 3. Destroyed FIRST
    ```
 
-6. **Resource provider** — Serves `index.html`, `style.css`, and 7 JS modules from JUCE BinaryData. Each file maps to a `BinaryData::` symbol (hyphens removed, dots → underscores). No external file loading.
+6. **Resource provider** — Serves the HTML/CSS/JS from JUCE BinaryData via a
+   generic lookup over `BinaryData::originalFilenames` (no per-file mapping).
+   Unknown `.html` paths fall back to `index.html`; anything else 404s.
 
-7. **Linux startup fallback chain** — If `uiReady` is not received, the editor retries navigation through multiple URL strategies in order: resource-provider URL, temp-file `file://` URL, then `data:text/html` URL built from embedded binary data.
+7. **Deferred initial navigation** — The editor defers `goToURL()` until it
+   has a non-zero size (`resized()`), with a timer fallback, avoiding
+   backend-dependent races on slow WebView startup.
 
 8. **Linux WebKit safety env** — Before creating the WebView, Linux sets `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1`, `WEBKIT_DISABLE_DMABUF_RENDERER=1`, and `WEBKIT_DISABLE_COMPOSITING_MODE=1` to reduce white-surface failures in some host/driver combinations.
 
+9. **JS injection safety** — every dynamic string embedded in
+   `evaluateJavascript()` goes through `jsQuoted()` (JSON escaping).
+
+10. **JS load-order rule** — the UI files execute top-level code at load.
+    Shared globals MUST be declared in `state.js` (first-loaded); a
+    TypeError at load silently kills everything defined later in that file.
+
 ### C++ → JS (Timer, 30Hz)
 
-The editor timer calls `evaluateJavascript()` to push state:
+The editor timer pushes state via `evaluateJavascript()`, split into named
+sub-tasks (`pushLooperState`, `pushMidiState`, `pushKeyBindings`,
+`pushMetronomeBeat`, `pushMidiActivity`, `androidTimerTasks`):
 
-```cpp
-// State: looperState, position, inputPeak, outputPeak, loopLength, hasUndo, flashType, armed
-webView->evaluateJavascript("window.updateLooperState(2, 0.45, 0.8, 0.6, 5.2, true, 0, false)");
-
-// MIDI CCs: 10 values + learning flag + learn target
-webView->evaluateJavascript("window.updateMidiState(-1,-1,-1,-1,-1,-1,-1,-1,-1,-1, false, -1)");
-
-// Key bindings (when changed)
-webView->evaluateJavascript("window.updateKeyBindings('','','','','','','','','','')");
-
-// Metronome beat
-webView->evaluateJavascript("window.updateMetroBeat(2, 14)");
-```
+- `updateLooperState(state, position, inPeak, outPeak, loopLen, canUndo, recordBasisSec, flashType, isArmed, isMuted, loopMode)` — every tick; the JS side render-caches and skips unchanged DOM writes
+- `updateMidiState(cc0..cc19, learning, learnTarget)` — only when the `midiStateChanged` dirty flag is set
+- `updateKeyBindings(k0..k19)` — only when `keyBindingsChanged` is set
+- `updateMetroBeat(beatInBar, totalBeats)` / `updateMidiActivity(active)` — every tick
 
 ### JS → C++ (Events)
 
@@ -408,13 +427,16 @@ window.__JUCE__.backend.emitEvent("metroSetBPM", { value: 120.0 });
 | Overdub Arm (1) | `setOverdubArm` |
 | Loop Mode (1) | `setLoopMode` |
 | Monitor (1) | `looperMonitor` |
-| Footswitch (2) | `looperFootswitchDown`, `looperFootswitchUp` |
-| MIDI Learn (20) | `midiLearnRecord`, `midiLearnStop`, `midiLearnClear`, `midiLearnUndo`, `midiLearnFootswitch`, `midiLearnOverdub`, `midiLearnBarMode`, `midiLearnClick`, `midiLearnPreCount`, `midiLearnArmOverdub`, `midiLearnPlayClick`, `midiLearnPlay`, `midiLearnMonitor`, `midiLearnLoopModeCycle`, `midiLearnClassicMode`, `midiLearnBeatsMode`, `midiLearnDynamicMode`, `midiLearnPanInputLeft`, `midiLearnPanInputCenter`, `midiLearnPanInputRight` |
-| MIDI Clear (20) | `midiClearRecord`, `midiClearStop`, etc. (one per action) |
+| Footswitch (3) | `looperFootswitch`, `looperFootswitchDown`, `looperFootswitchUp` |
+| MIDI Learn/Clear (40) | `midiLearn<Action>` / `midiClear<Action>` — registered in a loop over `getMidiActionNames()` (one pair per action) |
 | MIDI Cancel (1) | `midiLearnCancel` |
 | Key Bindings (2) | `keyBindSet`, `keyBindClear` |
-| Metronome (5) | `metroStart`, `metroStop`, `metroSetBPM`, `metroSetBeatsPerBar`, `metroSetPatterns` |
-| Resize (1) | `contentHeightChanged` |
+| Metronome (7) | `metroStart`, `metroStop`, `metroSetBPM`, `metroSetBeatsPerBar`, `metroSetNumBars`, `metroSetPatterns`, `metroSetAudible` |
+| Settings (3) | `setGlobalMaxLength`, `setMaxLayers`, `setMuteOnStartup` |
+| Window/System (4) | `resizeWindow`, `toggleFullscreen`, `openAudioSettings`, `uiReady` |
+| Standalone mute (2) | `standaloneInputMute`, `standaloneInputUnmute` |
+| BT Classic, Android (3) | `btClassicScan`, `btClassicConnect`, `btClassicDisconnect` |
+| Diagnostics (2) | `jsDiag`, `jsError` |
 
 ---
 
@@ -451,14 +473,16 @@ enum class MidiAction {
 ### Edge Detection
 
 CC values are edge-triggered to work with momentary footswitches:
-- **Rising edge**: CC value ≥ 64 AND previous value was < 64 → trigger action
+- **Rising edge**: CC value ≥ 1 AND previous value was 0 → trigger action
+- Any non-zero value counts as "pressed" (supports 0/1-style foot controllers)
 - Each action tracks its own `ccWasHigh[action]` state
-- Threshold constant: `CC_TRIGGER_THRESHOLD = 64`
+- Threshold constant: `CC_TRIGGER_THRESHOLD = 1`
 
 ### MIDI Learn
 
 1. `startMidiLearn(action)` sets `midiLearnActive = true, midiLearnTarget = action`
-2. `processMidiMessages()` on audio thread watches for any CC ≥ 64
+2. `processMidiMessages()` on audio thread completes the learn on ANY CC
+   message regardless of value (supports controllers that send val=0 on release)
 3. First matching CC is assigned, learn mode exits
 4. Auto-unassign: if CC was used by another action, that mapping is cleared
 
@@ -483,17 +507,11 @@ Key codes are JavaScript `KeyboardEvent.code` strings: `"Space"`, `"KeyR"`, `"Di
 
 ### Dispatch (JS)
 
-```javascript
-document.addEventListener('keydown', (e) => {
-    if (e.repeat) return;  // Prevent rapid-fire
-    const keyCode = e.code;
-    for (let i = 0; i < keyBindingsMap.length; i++) {
-        if (keyBindingsMap[i] === keyCode) {
-            ACTION_EVENTS[i]();  // Fire corresponding action
-        }
-    }
-});
-```
+`keymapping.js` dispatches keydown through a table: `KEY_ACTION_HANDLERS`
+maps action indices with dedicated behavior (record w/ pre-count, stop w/
+pre-count cancel, UI toggles, loop-mode sets, pan shortcuts); anything not
+in the table falls back to `emitEvent(ACTION_EVENTS[i])`. Index 4
+(footswitch) is gesture-based and handled separately (below).
 
 ### Footswitch Special Handling
 
@@ -509,7 +527,7 @@ Action 4 (Footswitch) uses separate down/up events for gesture detection:
 
 ```cpp
 static constexpr int LONG_PRESS_MS = 500;
-static constexpr int DOUBLE_PRESS_MS = 200;
+static constexpr int DOUBLE_PRESS_MS = 300;
 ```
 
 ### Detection Flow (Audio Thread)
@@ -524,7 +542,7 @@ CC/Key rising edge
      ├── While held: check if (now - pressStart) > 500ms
      │   └── Long press: Undo (playing/overdubbing)
      │
-     └── On 2nd rising edge within 200ms of 1st:
+     └── On 2nd rising edge within 300ms of 1st:
          ├── Double press: Stop (with layer finalization if overdubbing)
          └── While 2nd press held: check if (now - 2ndPressStart) > 500ms
              └── 2x Tap and Hold: Stop & Clear (from any active state)
@@ -566,65 +584,43 @@ Record trigger (any source)
 
 ## Resizable Window
 
-### Implementation
-
-```cpp
-// Editor constructor
-setResizable(true, true);
-constrainer.setFixedAspectRatio((double)designWidth / designHeight);
-setConstrainer(&constrainer);
-setSize(480, 700);
-
-// resized() callback
-void resized() override {
-    double zoom = (double)getWidth() / designWidth;
-    currentZoom = zoom;
-    webView->evaluateJavascript("window.setZoom(" + String(zoom) + ")");
-}
-```
-
-### CSS Zoom
-
-```javascript
-window.setZoom = function(factor) {
-    document.documentElement.style.zoom = factor;
-};
-```
-
-### Dynamic Height
-
-When collapsible panels toggle, JS reports content height:
-
-```javascript
-function reportContentHeight() {
-    const h = document.body.scrollHeight;
-    window.__JUCE__.backend.emitEvent("contentHeightChanged", { height: h });
-}
-```
-
-C++ updates `designHeight`, recalculates aspect ratio, and resizes the window.
+Desktop only (Android is fixed fullscreen). The editor uses a
+`ComponentBoundsConstrainer` with a locked 580×720 aspect ratio; `resized()`
+computes a zoom factor from the current size and pushes it to JS
+(`window.setZoom`), which scales `.app-wrapper` via CSS layout `zoom`. Layout
+zoom forces WebView2/WebKit to rerasterize text, SVGs, borders, and controls at
+the current editor size; compositor `transform: scale()` must not be used here
+because it can upscale the raster layer created at the startup resolution.
+A custom JS drag handle (`#customResizer` in `main.js`) projects the mouse
+delta onto the aspect diagonal and emits `resizeWindow(w, h)` back to C++
+(native JUCE resizer handles are obscured by the WebView). On Android,
+the shared scaler exits immediately and `mobile.js` replaces `setZoom` with a
+no-op. It sizes the wrapper, fixed bottom navigation, mute banner, and modals to
+the visible portrait area, using the screen's short edge so a landscape sensor
+state during portrait-locked startup cannot widen the UI.
 
 ---
 
 ## State Persistence
 
-### getStateInformation / setStateInformation
-
-Saved via `juce::ValueTree` with identifier `"OrbitLooper"`:
+`getStateInformation`/`setStateInformation` persist SETTINGS ONLY — loop
+audio is NOT saved. Stored via `juce::ValueTree` (identifier `OrbitLooper`),
+serialized to XML:
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `loop_L_[layer]_[chunk]` | Base64 | Loop layer L channel data |
-| `loop_R_[layer]_[chunk]` | Base64 | Loop layer R channel data |
-| `layerLength_[n]` | int | Each layer's length in samples |
-| `numLayers` | int | Active layer count |
-| `masterLoopLength` | int | Master loop length |
-| `looperState` | int | Current state enum value |
-| `readPosition` | int | Current playback position |
-| `maxLoopSeconds` | int | Max loop length setting |
-| `midiCC_record` ... `midiCC_paninputright` | int | MIDI CC assignments (20 actions) |
-| `keyBind_0` ... `keyBind_19` | String | Key bindings (20 actions) |
-| `apvts` | XML | AudioProcessorValueTreeState |
+| APVTS parameters | — | loop_level, gains, pans, loop_mode |
+| `maxLoopSeconds` | float | Global Max Length (single length authority) |
+| `midiCC_<action>` | int | MIDI CC assignments — keys generated from `getMidiActionNames()` lowercased (20 actions) |
+| `keyBind_0` … `keyBind_19` | String | Key bindings |
+| `loopMode` | int | Classic / Bars / Dynamic |
+| `maxLayerCount` | int | Runtime layer cap (1–8) |
+| `muteOnStartup`, `inputMuted` | int | Mute states |
+
+Additionally, Android persists app-level settings (muteOnStartup,
+btClassicLastDevice, bufferOptimized) in a `PropertiesFile`
+(`makeSettingsOptions()`), and the standalone holder saves plugin + audio
+device state every ~5 s (the OS can kill the app without destructors).
 
 ---
 
@@ -692,7 +688,11 @@ A `release` job collects all artifacts and creates a GitHub Release with zip arc
 
 ### Thread Safety
 - All cross-thread communication via `std::atomic<>` (bool, int, float)
-- No mutexes in the audio path
+- No mutexes in the audio path (the BT Classic status strings use a mutex on
+  the message/JNI side only; MIDI bytes flow through a lock-free SPSC queue)
+- Layer storage handshake: allocator retires a layer by publishing capacity 0
+  before touching it; the audio thread re-validates capacity after publishing
+  a claim — one side always yields
 - Key bindings array accessed only from message thread
 
 ---
@@ -702,10 +702,10 @@ A `release` job collects all artifacts and creates a GitHub Release with zip arc
 Information for developers looking to maintain or extend the plugin.
 
 ### Development Constraints & "Gotchas"
-1. **No External ES6 Modules** — The UI uses standard CSS/JS served by JUCE 8's `BinaryData`. While JUCE 8 supports modern JS, we avoid external `import`/`export` to ensure zero-latency UI loading and unified compatibility across all OS-native WebView backends without CORS edge cases. 
-2. **Real-time Safety** — The audio thread (`processBlock`) is strictly no-allocation. All memory for layers is pre-allocated in `prepareToPlay`. Communication with the UI is handled via Lock-Free atomics.
-3. **Memory Footprint** — 8 layers × stereo × max duration is substantial (~184 MB at 60s). An 1800s (30m) loop allocates ~5.5 GB RAM.
-4. **Undo Strategy** — Layers are independent. "Undo" simply decrements the active layer count and recalculates the master loop length. This allows for instant, multi-level undo without extra buffer copying.
+1. **No External ES6 Modules** — The UI uses standard CSS/JS served by JUCE 8's `BinaryData`. While JUCE 8 supports modern JS, we avoid external `import`/`export` to ensure zero-latency UI loading and unified compatibility across all OS-native WebView backends without CORS edge cases. All files share ONE global scope — declare shared globals in `state.js` (first loaded).
+2. **Real-time Safety** — The audio thread (`processBlock`) is strictly no-allocation. Layer storage is managed by the message-thread allocator (`handleAsyncUpdate`); the audio thread only claims published capacity. Communication with the UI is handled via lock-free atomics.
+3. **Memory Footprint** — Lazy: base layer ≈ 23 MB/min of Global Max (48 kHz stereo); each overdub layer costs memory proportional to the actual loop length (Dynamic mode layers reserve up to the Global Max).
+4. **Undo Strategy** — Layers are independent. "Undo" simply decrements the active layer count and recalculates the master loop length; the retired slot is zeroed asynchronously before reuse.
 
 ### Architecture Highlights
 - **State Push Model** — Instead of the UI "polling" the processor, the Editor Timer (30Hz) "pushes" state to JavaScript via `evaluateJavascript()`. This ensures the UI is always a reflection of the latest atomic values from the DSP.

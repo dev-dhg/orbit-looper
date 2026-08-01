@@ -36,6 +36,7 @@ function cancelPreCount() {
     clearBeatHighlights();
     stateText.textContent = 'READY';
     stateText.className = 'state-text empty';
+    _renderCache.stateKey = ''; // Force next updateLooperState to re-render
 }
 
 // ========== TRANSPORT BUTTONS ==========
@@ -47,6 +48,7 @@ btnUndo.addEventListener('pointerdown', function (e) { e.preventDefault(); emitE
 function toggleOverdubArm() {
     overdubArmEnabled = !overdubArmEnabled;
     btnArmOverdub.classList.toggle('active', overdubArmEnabled);
+    btnArmOverdub.setAttribute('aria-pressed', String(overdubArmEnabled));
     emitEventWithArgs('setOverdubArm', [overdubArmEnabled ? 1 : 0]);
 }
 btnArmOverdub.addEventListener('pointerdown', function (e) {
@@ -79,11 +81,16 @@ btnExport.addEventListener('pointerdown', function (e) { e.preventDefault(); emi
 function updateLoopModeVisual(mode) {
     currentLoopMode = mode;
     if (!loopModeToggle || !modePill) return;
+    if (mode === _renderCache.loopMode) return; // No visual change — skip DOM
+    _renderCache.loopMode = mode;
 
     loopModeToggle.setAttribute('data-mode', mode);
 
     modeSegments.forEach((seg, idx) => {
-        if (seg) seg.classList.toggle('active', idx === mode);
+        if (seg) {
+            seg.classList.toggle('active', idx === mode);
+            seg.setAttribute('aria-pressed', String(idx === mode));
+        }
     });
 
     isBarMode = (mode === 1);
@@ -96,14 +103,6 @@ function updateLoopModeVisual(mode) {
 
 window.setLoopMode = function (mode) {
     updateLoopModeVisual(mode);
-
-    if (mode === 0 || mode === 1) {
-        autoLengthActive = false;
-    } else {
-        autoLengthActive = true;
-    }
-    updateAutoLengthVisual(autoLengthActive);
-
     emitEventWithArgs('setLoopMode', [mode]);
 }
 
@@ -114,26 +113,17 @@ if (loopModeToggle) {
                 e.preventDefault();
                 setLoopMode(idx);
             });
+            seg.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setLoopMode(idx);
+                }
+            });
         }
     });
 }
 
-if (btnAutoLength) {
-    btnAutoLength.onclick = function () {
-        window.toggleAutoLength();
-    };
-}
-
 updateLoopModeVisual(0);
-
-// ========== AUTO LENGTH VISUAL ==========
-function updateAutoLengthVisual(active) {
-    autoLengthActive = active;
-    if (btnAutoLength) {
-        btnAutoLength.classList.toggle('active', active);
-        btnAutoLength.title = active ? 'Auto Length: ON' : 'Auto Length: OFF';
-    }
-}
 
 // ========== RECORD/STOP BUTTON ICONS ==========
 function updateRecordButtonIcon(state) {
@@ -151,6 +141,7 @@ function updateRecordButtonIcon(state) {
             iconHTML = '<circle cx="12" cy="12" r="6" fill="none" stroke="var(--color-stopped)" stroke-width="2"/><circle cx="12" cy="12" r="2" fill="var(--color-stopped)"/>'; btnRecord.title = 'Overdub'; break;
     }
     recordIcon.innerHTML = iconHTML;
+    btnRecord.setAttribute('aria-label', btnRecord.title);
 }
 
 function updateStopButtonIcon(state) {
@@ -161,6 +152,13 @@ function updateStopButtonIcon(state) {
         stopIcon.innerHTML = '<rect x="6" y="6" width="12" height="12" rx="1"/>';
         btnStop.title = 'Stop';
     }
+    btnStop.setAttribute('aria-label', btnStop.title);
+}
+
+function setButtonDisabled(button, disabled) {
+    button.classList.toggle('disabled', disabled);
+    button.disabled = disabled;
+    button.setAttribute('aria-disabled', String(disabled));
 }
 
 // ========== PLAYBACK RING ==========
@@ -251,10 +249,11 @@ function updateMetronomeEngine(forceRestart) {
 }
 
 // ========== STATE UPDATE (called from C++) ==========
-window.updateLooperState = function (state, position, inputLevel, outputLevel, loopLengthSec, canUndo, maxLoopLen, flashType, isArmed, isMuted, loopMode, isAutoLength) {
+// Render cache (_renderCache, declared in state.js): skip DOM writes when
+// nothing visual changed — this function runs at 30 Hz.
+window.updateLooperState = function (state, position, inputLevel, outputLevel, loopLengthSec, canUndo, recordBasisSec, flashType, isArmed, isMuted, loopMode) {
     try {
         updateLoopModeVisual(loopMode);
-        updateAutoLengthVisual(!!isAutoLength);
         overdubIsArmed = !!isArmed;
 
         if (state === STATES.RECORDING && state !== prevLooperState && loopLengthSec === 0
@@ -278,37 +277,51 @@ window.updateLooperState = function (state, position, inputLevel, outputLevel, l
             label = 'ARMED';
         }
 
-        if (!isPreCounting) {
-            stateText.textContent = label;
-            stateText.className = 'state-text ' + className;
+        var stateKey = className + '|' + label + '|' + (isPreCounting ? 1 : 0);
+        if (stateKey !== _renderCache.stateKey) {
+            _renderCache.stateKey = stateKey;
+
+            if (!isPreCounting) {
+                stateText.textContent = label;
+                stateText.className = 'state-text ' + className;
+            }
+
+            knob.className = 'knob';
+            if (overdubIsArmed && state === STATES.PLAYING) knob.classList.add('armed');
+            else if (state === STATES.RECORDING) knob.classList.add('recording');
+            else if (state === STATES.PLAYING) knob.classList.add('active');
+            else if (state === STATES.OVERDUBBING) knob.classList.add('overdubbing');
+
+            btnRecord.className = 'transport-btn btn-record state-' + className;
+            updateRecordButtonIcon(state);
+
+            setButtonDisabled(btnStop, state === STATES.EMPTY);
+            updateStopButtonIcon(state);
+            setButtonDisabled(btnClear, state === STATES.EMPTY);
+            // Export only while the loop is stable (matches the C++ guard)
+            setButtonDisabled(btnExport,
+                state !== STATES.PLAYING && state !== STATES.STOPPED);
         }
 
-        knob.className = 'knob';
-        if (overdubIsArmed && state === STATES.PLAYING) knob.classList.add('armed');
-        else if (state === STATES.RECORDING) knob.classList.add('recording');
-        else if (state === STATES.PLAYING) knob.classList.add('active');
-        else if (state === STATES.OVERDUBBING) knob.classList.add('overdubbing');
-
-        btnRecord.className = 'transport-btn btn-record state-' + className;
-        updateRecordButtonIcon(state);
-
-        btnStop.classList.toggle('disabled', state === STATES.EMPTY);
-        updateStopButtonIcon(state);
-        btnClear.classList.toggle('disabled', state === STATES.EMPTY);
-        btnUndo.classList.toggle('disabled', !canUndo);
-        btnExport.classList.toggle('disabled', state === STATES.EMPTY);
+        if (canUndo !== _renderCache.canUndo) {
+            _renderCache.canUndo = canUndo;
+            setButtonDisabled(btnUndo, !canUndo);
+        }
 
         var monitorIcon = document.getElementById('monitorIcon');
-        if (btnMonitor && monitorIcon) {
+        if (btnMonitor && monitorIcon && isMuted !== _renderCache.muted) {
+            _renderCache.muted = isMuted;
             if (isMuted) {
                 btnMonitor.classList.add('muted');
                 btnMonitor.style.color = '#f43f5e';
                 btnMonitor.title = 'Enable Monitoring (Muted)';
+                btnMonitor.setAttribute('aria-pressed', 'false');
                 monitorIcon.innerHTML = '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor"></polygon><line x1="23" y1="1" x2="1" y2="23" stroke="currentColor" stroke-width="2" stroke-linecap="round"></line>';
             } else {
                 btnMonitor.classList.remove('muted');
                 btnMonitor.style.color = '';
                 btnMonitor.title = 'Disable Monitoring (Active)';
+                btnMonitor.setAttribute('aria-pressed', 'true');
                 monitorIcon.innerHTML = '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>';
             }
         }
@@ -340,7 +353,7 @@ window.updateLooperState = function (state, position, inputLevel, outputLevel, l
         } else {
             var timeSec = 0;
             if (state === STATES.RECORDING) {
-                timeSec = position * maxLengthSec;
+                timeSec = position * recordBasisSec;
             } else if ((state === STATES.PLAYING || state === STATES.OVERDUBBING) && loopLengthSec > 0) {
                 timeSec = position * loopLengthSec;
             } else if (state === STATES.STOPPED && loopLengthSec > 0) {

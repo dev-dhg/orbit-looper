@@ -103,6 +103,7 @@ juce_add_binary_data(OrbitLooper_WebUI
         ../Source/ui/public/metronome.js
         ../Source/ui/public/keymapping.js
         ../Source/ui/public/main.js
+        ../Source/ui/public/mobile.js
 )
 
 # ── Plugin target (Standalone only on Android) ───────────────────────────────
