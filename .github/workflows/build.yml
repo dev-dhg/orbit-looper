@@ -15,7 +15,7 @@ jobs:
   # ===========================================================================
   build-windows-x64:
     if: true
-    runs-on: windows-2025
+    runs-on: windows-2022
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -48,7 +48,7 @@ jobs:
   # ===========================================================================
   build-windows-arm64:
     if: true
-    runs-on: windows-2025
+    runs-on: windows-2022
     steps:
       - name: Checkout
         uses: actions/checkout@v4
